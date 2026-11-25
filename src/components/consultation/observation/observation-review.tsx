@@ -19,6 +19,7 @@ import { BodyMap } from "./body-map";
 import { CareChart } from "./care-chart";
 import { FollowUps } from "./follow-ups";
 import type { PrescriptionLine } from "@/lib/prescription/schema";
+import { formatInZone } from "@/lib/time";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 type View = "relevant" | "pending" | "all";
@@ -45,6 +46,7 @@ export function ObservationReview({
   prescriptionLines,
   defaultDoctor,
   onStatusChange,
+  onValidationChange,
 }: {
   consultationId: string | null;
   transcription: TranscriptionInfo | null;
@@ -56,9 +58,14 @@ export function ObservationReview({
   prescriptionLines: PrescriptionLine[];
   defaultDoctor: string;
   onStatusChange?: () => void;
+  onValidationChange?: (v: ObservationValidationStatus | null) => void;
 }) {
   const [form, setForm] = useState<ObservationFormData | null>(initial.form);
-  const [validation, setValidation] = useState<ObservationValidationStatus | null>(initial.validationStatus);
+  const [validation, setValidationState] = useState<ObservationValidationStatus | null>(initial.validationStatus);
+  const setValidation = (v: ObservationValidationStatus | null) => {
+    setValidationState(v);
+    onValidationChange?.(v);
+  };
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [error, setError] = useState<string>();
   const [analyzing, setAnalyzing] = useState(false);
@@ -274,7 +281,7 @@ export function ObservationReview({
             </p>
             {form?.extractedAt && (
               <p className="text-xs text-muted-foreground">
-                Dernière analyse : {new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short" }).format(new Date(form.extractedAt))}
+                Dernière analyse : {formatInZone(form.extractedAt, { dateStyle: "short", timeStyle: "short" })}
                 {form.model ? ` · ${form.model}` : ""}
               </p>
             )}

@@ -81,3 +81,9 @@ export function linesFromMedications(meds: MedicationLine[], existing: Prescript
       fromMedicationId: m.id,
     }));
 }
+
+/** Lignes d'ordonnance imprimables (lignes vierges ignorées). */
+export function printableLines(rx: PrescriptionData | null): PrescriptionLine[] {
+  if (!rx || rx.noPrescription) return [];
+  return rx.lines.filter((l) => l.name.trim());
+}

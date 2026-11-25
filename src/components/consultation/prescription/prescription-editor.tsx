@@ -21,6 +21,7 @@ import {
 import type { ConsultationStatus } from "@/types/database";
 import { cn } from "@/lib/utils";
 import { useAutosave } from "../use-autosave";
+import { formatInZone } from "@/lib/time";
 
 const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `p-${Date.now()}-${Math.random()}`);
 const blankLine = (): PrescriptionLine => ({ id: newId(), name: "", dosage: "", posology: "", durationDays: null, problem: "" });
@@ -38,6 +39,7 @@ export function PrescriptionEditor({
   allergy,
   onLinesChange,
   onStatusChange,
+  onValidationChange,
 }: {
   consultationId: string | null;
   initial: PrescriptionStageData;
@@ -45,11 +47,16 @@ export function PrescriptionEditor({
   patientName: string;
   patientAge?: number;
   allergy: string | null;
-  onLinesChange?: (lines: PrescriptionLine[]) => void;
+  onLinesChange?: (lines: PrescriptionLine[], noPrescription: boolean) => void;
   onStatusChange?: (s: ConsultationStatus | null, validated: boolean) => void;
+  onValidationChange?: (v: "draft" | "validated" | null) => void;
 }) {
   const [data, setData] = useState<PrescriptionData>(initial.data ?? emptyPrescription());
-  const [validation, setValidation] = useState(initial.validationStatus);
+  const [validation, setValidationState] = useState(initial.validationStatus);
+  const setValidation = (v: "draft" | "validated" | null) => {
+    setValidationState(v);
+    onValidationChange?.(v);
+  };
   const [validating, setValidating] = useState(false);
   const [showIssues, setShowIssues] = useState(false);
   const autosave = useAutosave<PrescriptionData>(async (value) => {
@@ -63,7 +70,7 @@ export function PrescriptionEditor({
 
   const apply = (next: PrescriptionData) => {
     setData(next);
-    onLinesChange?.(next.lines);
+    onLinesChange?.(next.lines, next.noPrescription);
     autosave.changed(next);
   };
   const updateLine = (id: string, patch: Partial<PrescriptionLine>) => apply({ ...data, lines: data.lines.map((l) => (l.id === id ? { ...l, ...patch } : l)) });
@@ -116,7 +123,9 @@ export function PrescriptionEditor({
         <div className="sm:text-right">
           <p className="font-semibold">{patientName || "Patient non renseigné"}</p>
           {patientAge !== undefined && <p>{patientAge} ans</p>}
-          <p className="text-muted-foreground">{new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" }).format(new Date())}</p>
+          <p className="text-muted-foreground" suppressHydrationWarning>
+            {formatInZone(new Date(), { dateStyle: "long" })}
+          </p>
         </div>
       </div>
 

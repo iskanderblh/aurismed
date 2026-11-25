@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { rowToDraft } from "@/lib/consultation/mapping";
 import { getConsultation } from "@/lib/data/consultations";
 import { getPrescriptionStageData } from "@/lib/data/prescriptions";
+import { listDocuments } from "@/lib/data/documents";
 import { getObservationStageData, getRecordingStageData, purgeExpiredAudio } from "@/lib/data/recordings";
 import { getCurrentUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -36,10 +37,11 @@ export default async function ConsultationPage({ params }: PageProps<"/consultat
   const consultation = result.data;
   if (!consultation) notFound();
 
-  const [recordingData, observationData, prescriptionData] = await Promise.all([
+  const [recordingData, observationData, prescriptionData, documents] = await Promise.all([
     getRecordingStageData(user.id, consultation),
     getObservationStageData(consultation.id),
     getPrescriptionStageData(user.id, consultation.id),
+    listDocuments({ consultationId: consultation.id }),
   ]);
   const status = CONSULTATION_STATUS[consultation.status];
   return (
@@ -62,6 +64,7 @@ export default async function ConsultationPage({ params }: PageProps<"/consultat
         recordingData={recordingData}
         observationData={observationData}
         prescriptionData={prescriptionData}
+        documents={documents.ok ? documents.data : []}
       />
     </div>
   );

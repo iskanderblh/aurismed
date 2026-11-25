@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   FileSignature,
+  FileText,
   CloudUpload,
   Loader2,
   Mic,
@@ -31,11 +32,14 @@ import { CheckboxField, ChoiceField, FormSection, TextField } from "./form-contr
 import { RecordingStage } from "./recording/recording-stage";
 import { ObservationReview } from "./observation/observation-review";
 import { PrescriptionEditor } from "./prescription/prescription-editor";
+import { DocumentsPanel } from "./documents-panel";
+import type { DocumentInfo } from "@/lib/data/documents";
 import type { PrescriptionStageData } from "@/lib/data/prescriptions";
 import type { MedicationLine } from "@/lib/medical/form-state";
-import type { PrescriptionLine } from "@/lib/prescription/schema";
+import { printableLines, type PrescriptionLine } from "@/lib/prescription/schema";
 import { useRouter } from "next/navigation";
 import { WorkflowSteps } from "./workflow-steps";
+import { formatInZone } from "@/lib/time";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 type PortKey = "originPort" | "destination" | "plannedCall" | "possibleCall";
@@ -74,6 +78,7 @@ export function ConsultationWorkspace({
   recordingData,
   observationData,
   prescriptionData,
+  documents,
 }: {
   initialId: string | null;
   initialDraft: ConsultationDraftInput;
@@ -81,7 +86,11 @@ export function ConsultationWorkspace({
   recordingData: RecordingStageData;
   observationData: ObservationStageData;
   prescriptionData: PrescriptionStageData;
+  documents: DocumentInfo[];
 }) {
+  const [obsState, setObsState] = useState({ validated: observationData.validationStatus === "validated", validatedAt: observationData.validatedAt });
+  const [rxState, setRxState] = useState({ validated: prescriptionData.validationStatus === "validated", validatedAt: prescriptionData.validatedAt });
+  const [noPrescription, setNoPrescription] = useState(prescriptionData.data?.noPrescription ?? false);
   const router = useRouter();
   const [medications, setMedications] = useState<MedicationLine[]>(observationData.form?.medications ?? []);
   const [allergy, setAllergy] = useState(() => allergyText(observationData.form));
@@ -357,6 +366,7 @@ export function ConsultationWorkspace({
           prescriptionLines={rxLines}
           defaultDoctor={prescriptionData.prescriber.fullName}
           onStatusChange={() => router.refresh()}
+          onValidationChange={(v) => setObsState({ validated: v === "validated", validatedAt: v === "validated" ? new Date().toISOString() : null })}
         />
       </FormSection>
 
@@ -372,11 +382,29 @@ export function ConsultationWorkspace({
           patientName={[draft.patient.firstName, draft.patient.lastName].filter(Boolean).join(" ")}
           patientAge={draft.patient.age === undefined || draft.patient.age === "" ? computeAge(draft.patient.dateOfBirth ?? "") : Number(draft.patient.age)}
           allergy={allergy}
-          onLinesChange={setRxLines}
+          onLinesChange={(lines, none) => {
+            setRxLines(lines);
+            setNoPrescription(none);
+          }}
+          onValidationChange={(v) => setRxState({ validated: v === "validated", validatedAt: v === "validated" ? new Date().toISOString() : null })}
           onStatusChange={(_, validated) => {
             if (validated) setStep((s) => Math.max(s, 6));
             router.refresh();
           }}
+        />
+      </FormSection>
+
+      <FormSection title="Documents PDF" description="Fiche d'observation et ordonnance, générées à partir des données validées" icon={<FileText className="size-4" />}>
+        <DocumentsPanel
+          consultationId={id}
+          initial={documents}
+          observation={obsState}
+          prescription={{
+            ...rxState,
+            none: noPrescription,
+            printable: printableLines({ version: 1, lines: rxLines, notes: "", noPrescription }).length > 0,
+          }}
+          onGenerated={() => setStep((s) => Math.max(s, 6))}
         />
       </FormSection>
 
@@ -434,7 +462,7 @@ export function ConsultationWorkspace({
 
 function SaveIndicator({ state, savedAt, error }: { state: SaveState; savedAt?: string; error?: string }) {
   const time = savedAt
-    ? new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(savedAt))
+    ? formatInZone(savedAt, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : null;
   const content = {
     idle: <span className="text-muted-foreground">Commencez la saisie : le brouillon sera créé automatiquement.</span>,

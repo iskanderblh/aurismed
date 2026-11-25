@@ -21,6 +21,7 @@ export default async function NewConsultationPage() {
       />
       <ConsultationWorkspace initialId={null} initialDraft={draft} recordingData={recordingData} observationData={{ form: null, validationStatus: null, validatedAt: null }}
         prescriptionData={prescriptionData}
+        documents={[]}
       />
     </div>
   );
