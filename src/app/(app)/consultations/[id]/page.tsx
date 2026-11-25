@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { rowToDraft } from "@/lib/consultation/mapping";
 import { getConsultation } from "@/lib/data/consultations";
-import { getRecordingStageData, purgeExpiredAudio } from "@/lib/data/recordings";
+import { getObservationStageData, getRecordingStageData, purgeExpiredAudio } from "@/lib/data/recordings";
 import { getCurrentUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { CONSULTATION_STATUS, formatDateTime, patientDisplayName } from "@/lib/labels";
@@ -35,7 +35,10 @@ export default async function ConsultationPage({ params }: PageProps<"/consultat
   const consultation = result.data;
   if (!consultation) notFound();
 
-  const recordingData = await getRecordingStageData(user.id, consultation);
+  const [recordingData, observationData] = await Promise.all([
+    getRecordingStageData(user.id, consultation),
+    getObservationStageData(consultation.id),
+  ]);
   const status = CONSULTATION_STATUS[consultation.status];
   return (
     <div className="space-y-6">
@@ -55,6 +58,7 @@ export default async function ConsultationPage({ params }: PageProps<"/consultat
         initialDraft={rowToDraft(consultation)}
         lastSavedAt={consultation.updated_at}
         recordingData={recordingData}
+        observationData={observationData}
       />
     </div>
   );

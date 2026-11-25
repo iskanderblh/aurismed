@@ -84,16 +84,22 @@ export function RecordingStage({
   ensureId,
   data,
   onProgress,
+  onTranscriptionChange,
 }: {
   consultationId: string | null;
   ensureId: () => Promise<string | null>;
   data: RecordingStageData;
   onProgress?: (step: number) => void;
+  onTranscriptionChange?: (t: TranscriptionInfo | null) => void;
 }) {
   const [consent, setConsent] = useState<ConsentInfo>(data.consent);
   const [recordings, setRecordings] = useState<RecordingInfo[]>(data.recordings);
   const [local, setLocal] = useState<LocalSegment[]>([]);
-  const [transcription, setTranscription] = useState<TranscriptionInfo | null>(data.transcription);
+  const [transcription, setTranscriptionState] = useState<TranscriptionInfo | null>(data.transcription);
+  const setTranscription = (t: TranscriptionInfo | null) => {
+    setTranscriptionState(t);
+    onTranscriptionChange?.(t);
+  };
   const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
   const [transcribing, setTranscribing] = useState<{ done: number; total: number } | null>(null);
   const [transcribeError, setTranscribeError] = useState<string>();
@@ -457,7 +463,7 @@ export function RecordingStage({
 
       {confirmed && (
         <p className="flex items-center gap-2 text-sm text-success">
-          <CheckCircle2 className="size-4" /> Transcription confirmée. L&apos;extraction IA arrive en phase 4.
+          <CheckCircle2 className="size-4" /> Transcription confirmée. Vous pouvez lancer l&apos;analyse de la fiche d&apos;observation ci-dessous.
         </p>
       )}
     </div>

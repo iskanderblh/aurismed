@@ -4,6 +4,7 @@ import { useEffect, useEffectEvent, useRef, useState, useTransition } from "reac
 import {
   AlertCircle,
   CheckCircle2,
+  ClipboardCheck,
   CloudUpload,
   Loader2,
   Mic,
@@ -23,9 +24,11 @@ import {
   type PatientInformation,
   type VesselInformation,
 } from "@/lib/consultation/schema";
-import type { RecordingStageData } from "@/lib/recording/types";
+import type { RecordingStageData, TranscriptionInfo } from "@/lib/recording/types";
+import type { ObservationStageData } from "@/lib/data/recordings";
 import { CheckboxField, ChoiceField, FormSection, TextField } from "./form-controls";
 import { RecordingStage } from "./recording/recording-stage";
+import { ObservationReview } from "./observation/observation-review";
 import { WorkflowSteps } from "./workflow-steps";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -63,13 +66,18 @@ export function ConsultationWorkspace({
   initialDraft,
   lastSavedAt,
   recordingData,
+  observationData,
 }: {
   initialId: string | null;
   initialDraft: ConsultationDraftInput;
   lastSavedAt?: string;
   recordingData: RecordingStageData;
+  observationData: ObservationStageData;
 }) {
+  const [transcription, setTranscription] = useState<TranscriptionInfo | null>(recordingData.transcription);
   const [step, setStep] = useState(() => {
+    if (observationData.validationStatus === "validated") return 5;
+    if (observationData.form?.extractedAt) return 4;
     if (recordingData.transcription?.confirmedAt) return 3;
     if (recordingData.recordings.length) return 2;
     if (recordingData.consent.recordingConsentAt) return 1;
@@ -308,7 +316,28 @@ export function ConsultationWorkspace({
         description="Consentement, enregistrement de la consultation, transcription et correction"
         icon={<Mic className="size-4" />}
       >
-        <RecordingStage consultationId={id} ensureId={ensureId} data={recordingData} onProgress={(n) => setStep((s) => Math.max(s, n))} />
+        <RecordingStage
+          consultationId={id}
+          ensureId={ensureId}
+          data={recordingData}
+          onProgress={(n) => setStep((s) => Math.max(s, n))}
+          onTranscriptionChange={setTranscription}
+        />
+      </FormSection>
+
+      <FormSection
+        title="Fiche d'observation médicale"
+        description="Propositions de l'IA à vérifier, corriger ou rejeter, puis validation par le médecin"
+        icon={<ClipboardCheck className="size-4" />}
+      >
+        <ObservationReview
+          consultationId={id}
+          transcription={transcription}
+          providerConfigured={recordingData.providerConfigured}
+          providerLabel={recordingData.providerLabel}
+          initial={observationData}
+          onProgress={(n) => setStep((s) => Math.max(s, n))}
+        />
       </FormSection>
 
       {/* Barre d'actions fixe */}

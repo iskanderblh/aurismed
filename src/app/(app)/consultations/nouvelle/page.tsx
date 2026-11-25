@@ -18,7 +18,7 @@ export default async function NewConsultationPage() {
         title="Nouvelle consultation"
         description="Le brouillon est créé et enregistré automatiquement dès la première saisie."
       />
-      <ConsultationWorkspace initialId={null} initialDraft={draft} recordingData={recordingData} />
+      <ConsultationWorkspace initialId={null} initialDraft={draft} recordingData={recordingData} observationData={{ form: null, validationStatus: null, validatedAt: null }} />
     </div>
   );
 }
