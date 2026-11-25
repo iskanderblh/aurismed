@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ClipboardCheck,
+  FileSignature,
   CloudUpload,
   Loader2,
   Mic,
@@ -29,6 +30,11 @@ import type { ObservationStageData } from "@/lib/data/recordings";
 import { CheckboxField, ChoiceField, FormSection, TextField } from "./form-controls";
 import { RecordingStage } from "./recording/recording-stage";
 import { ObservationReview } from "./observation/observation-review";
+import { PrescriptionEditor } from "./prescription/prescription-editor";
+import type { PrescriptionStageData } from "@/lib/data/prescriptions";
+import type { MedicationLine } from "@/lib/medical/form-state";
+import type { PrescriptionLine } from "@/lib/prescription/schema";
+import { useRouter } from "next/navigation";
 import { WorkflowSteps } from "./workflow-steps";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -67,15 +73,22 @@ export function ConsultationWorkspace({
   lastSavedAt,
   recordingData,
   observationData,
+  prescriptionData,
 }: {
   initialId: string | null;
   initialDraft: ConsultationDraftInput;
   lastSavedAt?: string;
   recordingData: RecordingStageData;
   observationData: ObservationStageData;
+  prescriptionData: PrescriptionStageData;
 }) {
+  const router = useRouter();
+  const [medications, setMedications] = useState<MedicationLine[]>(observationData.form?.medications ?? []);
+  const [allergy, setAllergy] = useState(() => allergyText(observationData.form));
+  const [rxLines, setRxLines] = useState<PrescriptionLine[]>(prescriptionData.data?.lines ?? []);
   const [transcription, setTranscription] = useState<TranscriptionInfo | null>(recordingData.transcription);
   const [step, setStep] = useState(() => {
+    if (prescriptionData.validationStatus === "validated") return 6;
     if (observationData.validationStatus === "validated") return 5;
     if (observationData.form?.extractedAt) return 4;
     if (recordingData.transcription?.confirmedAt) return 3;
@@ -337,6 +350,33 @@ export function ConsultationWorkspace({
           providerLabel={recordingData.providerLabel}
           initial={observationData}
           onProgress={(n) => setStep((s) => Math.max(s, n))}
+          onFormChange={(f) => {
+            setMedications(f.medications);
+            setAllergy(allergyText(f));
+          }}
+          prescriptionLines={rxLines}
+          defaultDoctor={prescriptionData.prescriber.fullName}
+          onStatusChange={() => router.refresh()}
+        />
+      </FormSection>
+
+      <FormSection
+        title="Ordonnance"
+        description="Rédigée et validée par le médecin"
+        icon={<FileSignature className="size-4" />}
+      >
+        <PrescriptionEditor
+          consultationId={id}
+          initial={prescriptionData}
+          medications={medications}
+          patientName={[draft.patient.firstName, draft.patient.lastName].filter(Boolean).join(" ")}
+          patientAge={draft.patient.age === undefined || draft.patient.age === "" ? computeAge(draft.patient.dateOfBirth ?? "") : Number(draft.patient.age)}
+          allergy={allergy}
+          onLinesChange={setRxLines}
+          onStatusChange={(_, validated) => {
+            if (validated) setStep((s) => Math.max(s, 6));
+            router.refresh();
+          }}
         />
       </FormSection>
 
@@ -420,4 +460,12 @@ function SaveIndicator({ state, savedAt, error }: { state: SaveState; savedAt?: 
       {content}
     </div>
   );
+}
+
+/** Allergie médicamenteuse renseignée dans la fiche (affichée sur l'ordonnance). */
+function allergyText(form: ObservationStageData["form"]): string | null {
+  const flag = form?.fields["history.drugAllergy"]?.value;
+  const detail = form?.fields["history.drugAllergyDetail"]?.value;
+  if (flag !== "oui" && !detail) return null;
+  return typeof detail === "string" && detail ? detail : "Allergie signalée, médicament non précisé.";
 }

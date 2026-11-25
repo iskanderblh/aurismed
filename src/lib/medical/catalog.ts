@@ -7,7 +7,7 @@
  * ils restent sous le contrôle du médecin.
  */
 
-export type FieldType = "text" | "longtext" | "number" | "yesno" | "choice" | "multi";
+export type FieldType = "text" | "longtext" | "number" | "yesno" | "choice" | "multi" | "datetime";
 
 export type Option = { code: string; label: string };
 
@@ -29,7 +29,7 @@ export type FieldDef = {
   hint?: string;
 };
 
-export type SectionKey = "history" | "vitals" | "trauma" | "medical" | "exam" | "teleconsultation";
+export type SectionKey = "history" | "vitals" | "trauma" | "medical" | "exam" | "teleconsultation" | "decision";
 
 export const SECTIONS: { key: SectionKey; title: string; description: string }[] = [
   { key: "history", title: "Antécédents et histoire de la maladie", description: "Page 1 de la fiche" },
@@ -37,7 +37,8 @@ export const SECTIONS: { key: SectionKey; title: string; description: string }[]
   { key: "trauma", title: "Douleur et bilan lésionnel", description: "Examen d'un blessé / traumatisé" },
   { key: "medical", title: "Bilan médical", description: "Bilan d'un malade" },
   { key: "exam", title: "Examen clinique", description: "Constatations de l'examen" },
-  { key: "teleconsultation", title: "Téléconsultation médicale", description: "Conclusion, surveillance, actes, décision" },
+  { key: "teleconsultation", title: "Téléconsultation médicale", description: "Conclusion, hypothèses, surveillance, actes" },
+  { key: "decision", title: "Décision", description: "Réservée au médecin : jamais proposée par l'IA" },
 ];
 
 const yesno = (section: SectionKey, group: string, path: string, label: string, extra: Partial<FieldDef> = {}): FieldDef => ({
@@ -50,6 +51,15 @@ const yesno = (section: SectionKey, group: string, path: string, label: string, 
 });
 
 const o = (code: string, label: string): Option => ({ code, label });
+
+/** Choix de décision communs à la fiche et aux appels de suivi (pages 6 à 8). */
+export const DECISION_OPTIONS: Option[] = [
+  o("soins_bord", "Soins à bord"),
+  o("debarquement", "Débarquement à l'escale"),
+  o("deroutement", "Déroutement"),
+  o("evasan", "Évacuation non médicalisée (EVASAN)"),
+  o("evamed", "Évacuation médicalisée (EVAMED)"),
+];
 
 export const FIELDS: FieldDef[] = [
   // --- Page 1 : antécédents et histoire ------------------------------------
@@ -186,6 +196,10 @@ export const FIELDS: FieldDef[] = [
 
   // --- Page 6 : téléconsultation ----------------------------------------------
   {
+    path: "teleconsultation.conclusion", label: "Conclusion", type: "longtext", section: "teleconsultation", group: "Conclusion",
+    hint: "Seulement la conclusion énoncée explicitement par le médecin. Ne jamais en rédiger une.",
+  },
+  {
     path: "teleconsultation.diagnosticHypotheses", label: "Hypothèses diagnostiques", type: "longtext", section: "teleconsultation", group: "Conclusion",
     hint: "Seulement les hypothèses formulées explicitement par le médecin, au conditionnel. Ne jamais en proposer.",
   },
@@ -202,6 +216,20 @@ export const FIELDS: FieldDef[] = [
     path: "teleconsultation.sentToCcmm", label: "Envoi au CCMM", type: "multi", section: "teleconsultation", group: "Envoi au CCMM", ai: false,
     options: [o("ecg", "ECG"), o("photos", "Photos"), o("compte_rendu", "Compte rendu médical"), o("dossier_conclu", "Dossier CCMM conclu")],
   },
+  // --- Page 6 : décision (jamais proposée par l'IA) ----------------------------
+  { path: "decision.at", label: "Date et heure de la décision", type: "datetime", section: "decision", group: "Décision", ai: false },
+  {
+    path: "decision.choice", label: "Décision", type: "choice", section: "decision", group: "Décision", ai: false,
+    options: DECISION_OPTIONS,
+  },
+  { path: "decision.recallDays", label: "Rappel prévu dans", type: "number", unit: "jours", min: 0, max: 90, section: "decision", group: "Soins à bord", ai: false },
+  yesno("decision", "Débarquement / déroutement", "decision.quayReception", "Accueil à quai", { ai: false }),
+  yesno("decision", "Débarquement / déroutement", "decision.localAgentContacted", "Agent local contacté", { ai: false }),
+  { path: "decision.port", label: "Nom du port", type: "text", section: "decision", group: "Évacuation ou débarquement", ai: false },
+  { path: "decision.country", label: "Pays", type: "text", section: "decision", group: "Évacuation ou débarquement", ai: false },
+  { path: "decision.cross", label: "CROSS", type: "text", section: "decision", group: "Évacuation ou débarquement", ai: false },
+  { path: "decision.samu", label: "SAMU de coordination", type: "text", section: "decision", group: "Évacuation ou débarquement", ai: false },
+  { path: "decision.evacuatedAt", label: "Patient évacué ou débarqué le", type: "datetime", section: "decision", group: "Évacuation ou débarquement", ai: false },
 ];
 
 export const FIELD_BY_PATH = new Map(FIELDS.map((f) => [f.path, f]));

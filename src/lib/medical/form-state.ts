@@ -41,10 +41,45 @@ export type MedicationLine = {
 export type Contradiction = { paths: string[]; description: string; quotes: string[] };
 export type MissingItem = { path: string; reason: string };
 
+/** Appel de suivi (fiche de suivi, pages 7 et 8). Saisi uniquement par le médecin. */
+export type FollowUpCall = {
+  id: string;
+  at: string | null;
+  doctor: string;
+  systolic: number | null;
+  diastolic: number | null;
+  heartRate: number | null;
+  respRate: number | null;
+  pain: number | null;
+  temperature: number | null;
+  glycemia: number | null;
+  decision: string | null;
+  nextCall: string;
+  notes: string;
+};
+
+/** Diagramme de soins et de surveillance (page 9) : colonnes horodatées × lignes. */
+export type CareChart = { columns: { id: string; at: string }[]; cells: Record<string, string> };
+
+export const BODY_MARK_KINDS = [
+  { code: "douleur", label: "Zone douloureuse" },
+  { code: "plaie", label: "Plaie" },
+  { code: "hematome", label: "Hématome" },
+  { code: "fracture", label: "Fracture" },
+  { code: "brulure", label: "Brûlure" },
+  { code: "autre", label: "Autre lésion" },
+] as const;
+export type BodyMarkKind = (typeof BODY_MARK_KINDS)[number]["code"];
+/** Annotation du schéma corporel (page 3), coordonnées relatives 0–1. */
+export type BodyMark = { id: string; view: "front" | "back"; x: number; y: number; kind: BodyMarkKind; note: string };
+
 export type ObservationFormData = {
   version: 1;
   fields: Record<string, FieldState>;
   medications: MedicationLine[];
+  followUps: FollowUpCall[];
+  careChart: CareChart;
+  bodyMarks: BodyMark[];
   contradictions: Contradiction[];
   missing: MissingItem[];
   /** Informations rejetées lors de la validation de la réponse IA (pour transparence). */
@@ -54,12 +89,25 @@ export type ObservationFormData = {
 };
 
 export function emptyFormData(): ObservationFormData {
-  return { version: 1, fields: {}, medications: [], contradictions: [], missing: [], discarded: [] };
+  return {
+    version: 1,
+    fields: {},
+    medications: [],
+    followUps: [],
+    careChart: { columns: [], cells: {} },
+    bodyMarks: [],
+    contradictions: [],
+    missing: [],
+    discarded: [],
+  };
 }
 
 export function isEmptyValue(v: FieldValue | null | undefined) {
   return v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
 }
+
+/** Date et heure locales, format des champs datetime-local (AAAA-MM-JJTHH:MM). */
+export const DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
 const YES = new Set(["oui", "yes", "true", "vrai", "o", "1", "présent", "present"]);
 const NO = new Set(["non", "no", "false", "faux", "n", "0", "absent", "aucun", "aucune"]);
@@ -95,6 +143,8 @@ export function normalizeValue(field: FieldDef, raw: string): { ok: true; value:
       if (field.options?.some((x) => x.code === code)) return { ok: true, value: code };
       return { ok: false, reason: `option « ${text} » inconnue` };
     }
+    case "datetime":
+      return DATETIME_RE.test(text) ? { ok: true, value: text.slice(0, 16) } : { ok: false, reason: `« ${text} » n'est pas une date` };
     case "multi": {
       const codes = [...new Set(text.toLowerCase().split(/[,;|]/).map((c) => c.trim()).filter(Boolean))];
       const unknown = codes.filter((c) => !field.options?.some((x) => x.code === c));
@@ -123,6 +173,8 @@ export function isValidManualValue(field: FieldDef, value: FieldValue | null): b
       );
     case "choice":
       return typeof value === "string" && Boolean(field.options?.some((x) => x.code === value));
+    case "datetime":
+      return typeof value === "string" && DATETIME_RE.test(value);
     case "multi":
       return Array.isArray(value) && value.every((c) => field.options?.some((x) => x.code === c));
   }
@@ -154,12 +206,46 @@ const medicationSchema = z.object({
   notes: z.array(z.string().max(500)).max(10).optional(),
 });
 
+const num = (min: number, max: number) => z.number().min(min).max(max).nullable();
+const id = z.string().min(1).max(64);
+const followUpSchema = z.object({
+  id,
+  at: z.string().regex(DATETIME_RE).nullable(),
+  doctor: z.string().max(200),
+  systolic: num(30, 300),
+  diastolic: num(10, 200),
+  heartRate: num(10, 300),
+  respRate: num(0, 80),
+  pain: num(0, 10),
+  temperature: num(30, 45),
+  glycemia: num(0, 10),
+  decision: z.enum(["soins_bord", "debarquement", "deroutement", "evasan", "evamed"]).nullable(),
+  nextCall: z.string().max(300),
+  notes: z.string().max(2000),
+});
+const careChartSchema = z.object({
+  columns: z.array(z.object({ id, at: z.string().regex(DATETIME_RE) })).max(60),
+  cells: z.record(z.string().max(160), z.string().max(100)),
+});
+const bodyMarkSchema = z.object({
+  id,
+  view: z.enum(["front", "back"]),
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  kind: z.enum(["douleur", "plaie", "hematome", "fracture", "brulure", "autre"]),
+  note: z.string().max(300),
+});
+
 /** Schéma de la fiche telle qu'envoyée par le navigateur : chaque champ est vérifié contre le catalogue. */
 export const formDataSchema = z
   .object({
     version: z.literal(1),
     fields: z.record(z.string(), fieldStateSchema),
     medications: z.array(medicationSchema).max(50),
+    // Ajoutés en phase 5 : absents des fiches plus anciennes.
+    followUps: z.array(followUpSchema).max(20).default([]),
+    careChart: careChartSchema.default({ columns: [], cells: {} }),
+    bodyMarks: z.array(bodyMarkSchema).max(100).default([]),
     contradictions: z.array(z.object({ paths: z.array(z.string()).max(20), description: z.string().max(1000), quotes: z.array(z.string().max(1000)).max(10) })).max(50),
     missing: z.array(z.object({ path: z.string(), reason: z.string().max(500) })).max(200),
     discarded: z.array(z.object({ path: z.string(), value: z.string().max(2000), reason: z.string().max(500) })).max(200),
