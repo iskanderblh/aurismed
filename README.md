@@ -16,7 +16,7 @@ corrige et valide ; l'application génère ensuite les PDF.
 | 2 | Consultation : patient, navire, brouillons, historique, paramètres | ✅ |
 | 3 | Enregistrement vocal et transcription | ✅ |
 | 4 | Extraction IA (JSON structuré, confiance, sources) et revue par le médecin | ✅ |
-| 5 | Fiche d'observation complète (BFV, bilans, décision, suivi, diagramme de soins) | à venir |
+| 5 | Fiche d'observation complète (décision, schéma des lésions, suivi, diagramme de soins) et ordonnance | ✅ |
 | 6 | PDF (fiche d'observation, ordonnance) | à venir |
 | 7 | Tests et finalisation | à venir |
 
@@ -114,6 +114,25 @@ Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter 
 Évaluation avec le vrai fournisseur sur 8 scénarios fictifs (`src/server/ai/scenarios.ts`) :
 `OPENAI_API_KEY=… npm run eval:extraction` (les transcriptions envoyées sont synthétiques).
 
+## Décision, suivi et ordonnance
+
+- **Décision** (page 6) : date et heure, soins à bord / débarquement / déroutement / EVASAN /
+  EVAMED, rappel, accueil à quai, agent local, port, pays, CROSS, SAMU, heure d'évacuation. Ces
+  champs, comme « Envoi au CCMM », ne sont jamais transmis à l'IA (`ai: false` dans le catalogue)
+  et une nouvelle analyse ne les modifie pas.
+- **Schéma des lésions** (page 3) : un clic sur la silhouette (face ou dos) pose une annotation
+  typée (douleur, plaie, hématome, fracture, brûlure, autre) avec une précision.
+- **Fiche de suivi** (pages 7 et 8) : appels n° 2 et suivants, constantes bornées (une valeur hors
+  limites n'est pas enregistrée), décision et prochain rendez-vous.
+- **Diagramme de soins** (page 9) : une colonne par relevé horodaté ; lignes des médicaments de
+  l'ordonnance, 8 paramètres de surveillance et 8 soins / examens.
+- **Ordonnance** (table `prescriptions`) : rédigée par le médecin. Les médicaments acceptés dans
+  la fiche peuvent être repris sur action explicite, sans dosage ajouté. La validation exige, pour
+  chaque ligne, nom, dosage, posologie et durée, ou la mention « Aucun médicament prescrit ».
+  L'allergie renseignée dans la fiche est rappelée en tête.
+- **Statut de la consultation** : « Validée » quand la fiche et l'ordonnance sont validées ;
+  toute modification ultérieure la repasse « En cours » (`src/lib/data/consultation-status.ts`).
+
 ## Installation
 
 Prérequis : Node.js 20.9 ou plus récent, un projet Supabase (l'offre gratuite suffit).
@@ -170,7 +189,7 @@ npm run build && npm start   # production locale
 | `npm run build` | build de production |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | génération des types de routes + TypeScript |
-| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes, contrôles et fusion de l'extraction |
+| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes, contrôles et fusion de l'extraction, règles de l'ordonnance |
 | `npm run eval:extraction` | évaluation de l'extraction sur des scénarios fictifs avec le fournisseur réel (clé requise, appels facturés) |
 | `npm run test:db` | applique la migration sur un PostgreSQL local jetable et vérifie l'isolation RLS (nécessite `initdb`, `pg_ctl` et `psql`) |
 

@@ -156,3 +156,44 @@ describe("scénarios d'évaluation", async () => {
     }
   });
 });
+
+describe("phase 5 : saisies réservées au médecin", () => {
+  it("conserve suivi, diagramme et schéma lors d'une nouvelle analyse, et n'accepte pas de décision de l'IA", async () => {
+    const { emptyFormData } = await import("@/lib/medical/form-state");
+    const prev = {
+      ...emptyFormData(),
+      fields: { "decision.choice": { value: "soins_bord", status: "manual" as const } },
+      followUps: [{ id: "f1", at: "2026-11-25T10:00", doctor: "Dr Test", systolic: 120, diastolic: 80, heartRate: 80, respRate: 16, pain: 2, temperature: 37.5, glycemia: 1.1, decision: "soins_bord", nextCall: "demain", notes: "" }],
+      careChart: { columns: [{ id: "c1", at: "2026-11-25T10:00" }], cells: { "sv:fc:c1": "80" } },
+      bodyMarks: [{ id: "b1", view: "front" as const, x: 0.5, y: 0.4, kind: "plaie" as const, note: "" }],
+    };
+    const f = processExtraction(
+      out([item({ path: "decision.choice" as never, value: "evamed", source_quote: "Le patient" })]),
+      transcript,
+      prev,
+    );
+    expect(f.fields["decision.choice"]).toEqual({ value: "soins_bord", status: "manual" });
+    expect(f.followUps).toEqual(prev.followUps);
+    expect(f.careChart).toEqual(prev.careChart);
+    expect(f.bodyMarks).toEqual(prev.bodyMarks);
+    expect(formDataSchema.safeParse(f).success).toBe(true);
+  });
+  it("les champs de décision ne sont pas proposés à l'IA", () => {
+    expect(AI_FIELD_PATHS.some((p) => p.startsWith("decision."))).toBe(false);
+    expect(AI_FIELD_PATHS).not.toContain("teleconsultation.sentToCcmm");
+  });
+  it("une fiche de la phase 4 (sans suivi) reste lisible", () => {
+    const old = { version: 1, fields: {}, medications: [], contradictions: [], missing: [], discarded: [] };
+    const parsed = formDataSchema.parse(old);
+    expect(parsed.followUps).toEqual([]);
+    expect(parsed.careChart).toEqual({ columns: [], cells: {} });
+  });
+  it("refuse une date invalide et un suivi hors limites", () => {
+    const base = { version: 1, fields: { "decision.at": { value: "25/11/2026", status: "manual" } }, medications: [], contradictions: [], missing: [], discarded: [] };
+    expect(formDataSchema.safeParse(base).success).toBe(false);
+    const ok = { ...base, fields: { "decision.at": { value: "2026-11-25T14:30", status: "manual" } } };
+    expect(formDataSchema.safeParse(ok).success).toBe(true);
+    const bad = { ...ok, followUps: [{ id: "f", at: null, doctor: "", systolic: 900, diastolic: null, heartRate: null, respRate: null, pain: null, temperature: null, glycemia: null, decision: null, nextCall: "", notes: "" }] };
+    expect(formDataSchema.safeParse(bad).success).toBe(false);
+  });
+});

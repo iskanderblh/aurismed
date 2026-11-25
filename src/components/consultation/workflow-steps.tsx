@@ -18,7 +18,7 @@ export function WorkflowSteps({ current = 0, completed = [] as number[] }) {
       {WORKFLOW_STEPS.map((step, i) => {
         const active = i === current;
         const done = completed.includes(i);
-        const available = step.phase <= 4;
+        const available = step.phase <= 5;
         return (
           <li
             key={step.key}

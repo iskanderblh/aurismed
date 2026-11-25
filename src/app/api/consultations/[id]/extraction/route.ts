@@ -4,6 +4,7 @@ import { UUID_RE } from "@/lib/data/consultations";
 import { formDataSchema, type ObservationFormData } from "@/lib/medical/form-state";
 import { ExtractionError, extractWithOpenAI } from "@/server/ai/openai-extraction";
 import { processExtraction } from "@/server/ai/process";
+import { syncConsultationStatus } from "@/lib/data/consultation-status";
 import type { Json } from "@/types/database";
 
 export const maxDuration = 300;
@@ -77,5 +78,6 @@ export async function POST(_request: Request, { params }: RouteContext<"/api/con
     entity_type: "observation_form",
     metadata: { model, fields: Object.values(form.fields).filter((f) => f.status === "extracted" || f.status === "needs_verification").length, medications: form.medications.length },
   });
+  await syncConsultationStatus(supabase, id);
   return NextResponse.json({ ok: true, form, validationStatus: "ai_extracted" });
 }

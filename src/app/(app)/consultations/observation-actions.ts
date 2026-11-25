@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { UUID_RE } from "@/lib/data/consultations";
+import { syncConsultationStatus } from "@/lib/data/consultation-status";
 import { formDataSchema, pendingReview, type ObservationFormData } from "@/lib/medical/form-state";
 import type { Json, ObservationValidationStatus } from "@/types/database";
 
@@ -39,6 +40,7 @@ export async function saveObservationForm(consultationId: string, form: Observat
     console.error("[fiche] sauvegarde", error?.code, error?.message);
     return { ok: false, error: "La fiche n'a pas pu être enregistrée." };
   }
+  await syncConsultationStatus(c.supabase, consultationId);
   return { ok: true, savedAt: data.updated_at, validationStatus: data.validation_status };
 }
 
@@ -66,5 +68,6 @@ export async function validateObservationForm(consultationId: string, form: Obse
     entity_type: "observation_form",
     entity_id: data.id,
   });
+  await syncConsultationStatus(c.supabase, consultationId);
   return { ok: true, savedAt: data.updated_at, validationStatus: data.validation_status };
 }

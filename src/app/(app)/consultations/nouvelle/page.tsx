@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getPrescriptionStageData } from "@/lib/data/prescriptions";
 import { ConsultationWorkspace } from "@/components/consultation/consultation-workspace";
 import { PageHeader } from "@/components/layout/page-header";
 import { emptyDraft } from "@/lib/consultation/schema";
@@ -9,7 +10,7 @@ export const metadata: Metadata = { title: "Nouvelle consultation" };
 
 export default async function NewConsultationPage() {
   const user = await getCurrentUser();
-  const recordingData = await getRecordingStageData(user.id, null);
+  const [recordingData, prescriptionData] = await Promise.all([getRecordingStageData(user.id, null), getPrescriptionStageData(user.id, null)]);
   const draft = emptyDraft();
   // Date et heure d'appel pré-remplies côté client (fuseau du médecin) : laissées vides ici.
   return (
@@ -18,7 +19,9 @@ export default async function NewConsultationPage() {
         title="Nouvelle consultation"
         description="Le brouillon est créé et enregistré automatiquement dès la première saisie."
       />
-      <ConsultationWorkspace initialId={null} initialDraft={draft} recordingData={recordingData} observationData={{ form: null, validationStatus: null, validatedAt: null }} />
+      <ConsultationWorkspace initialId={null} initialDraft={draft} recordingData={recordingData} observationData={{ form: null, validationStatus: null, validatedAt: null }}
+        prescriptionData={prescriptionData}
+      />
     </div>
   );
 }

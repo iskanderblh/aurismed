@@ -42,6 +42,10 @@ export function processExtraction(
   const normalizedTranscript = normalizeForMatch(transcript);
   const result: ObservationFormData = {
     ...emptyFormData(),
+    // Saisies exclusivement médicales : reprises telles quelles.
+    followUps: prev.followUps ?? [],
+    careChart: prev.careChart ?? { columns: [], cells: {} },
+    bodyMarks: prev.bodyMarks ?? [],
     extractedAt: (meta.now ?? new Date()).toISOString(),
     model: meta.model,
   };

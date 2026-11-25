@@ -28,7 +28,14 @@ export function formatValue(field: FieldDef, value: FieldValue | null | undefine
   if (typeof value === "boolean") return value ? "Oui" : "Non";
   if (Array.isArray(value)) return value.map((c) => optionLabel(field, c)).join(", ");
   if (field.type === "choice") return optionLabel(field, String(value));
+  if (field.type === "datetime") return formatLocalDateTime(String(value));
   return `${value}${field.unit ? ` ${field.unit}` : ""}`;
+}
+
+/** « 2026-11-25T14:30 » → « 25/11/2026 14:30 » (heure locale saisie, sans conversion). */
+export function formatLocalDateTime(v: string) {
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}` : v;
 }
 
 /** Une ligne de la fiche : saisie typée, statut, provenance et actions de revue. */
@@ -52,7 +59,7 @@ export function FieldEditor({
   const [showSource, setShowSource] = useState(false);
   const status = state?.status ?? "not_mentioned";
   const pending = status === "extracted" || status === "needs_verification";
-  const meta = STATUS_META[status];
+  const meta = field.ai === false && !state ? { label: "Réservé au médecin", variant: "outline" as const } : STATUS_META[status];
   const lowConfidence = pending && (status === "needs_verification" || state?.confidence !== "high");
   const inputId = `f-${field.path.replace(/\./g, "-")}`;
   const context = showSource && state?.source ? quoteContext(transcript, state.source) : null;
@@ -170,6 +177,21 @@ function ValueInput({
       return (
         <Textarea id={id} rows={3} value={typeof value === "string" ? value : ""} maxLength={20000} onChange={(e) => onChange(e.target.value || null)} />
       );
+    case "datetime":
+      return (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            id={id}
+            type="datetime-local"
+            className="max-w-56"
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.target.value ? e.target.value.slice(0, 16) : null)}
+          />
+          <Button type="button" size="sm" variant="ghost" onClick={() => onChange(nowLocal())}>
+            Maintenant
+          </Button>
+        </div>
+      );
     case "number":
       return <NumberInput id={id} field={field} value={typeof value === "number" ? value : null} onChange={onChange} />;
     case "yesno":
@@ -209,6 +231,13 @@ function ValueInput({
       );
     }
   }
+}
+
+/** Date et heure locales actuelles au format datetime-local. */
+export function nowLocal() {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function NumberInput({ id, field, value, onChange }: { id: string; field: FieldDef; value: number | null; onChange: (v: number | null) => void }) {

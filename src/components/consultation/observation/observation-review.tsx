@@ -15,6 +15,10 @@ import { cn } from "@/lib/utils";
 import { FormSection } from "../form-controls";
 import { FieldEditor } from "./field-editor";
 import { MedicationsEditor } from "./medications-editor";
+import { BodyMap } from "./body-map";
+import { CareChart } from "./care-chart";
+import { FollowUps } from "./follow-ups";
+import type { PrescriptionLine } from "@/lib/prescription/schema";
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
 type View = "relevant" | "pending" | "all";
@@ -37,6 +41,10 @@ export function ObservationReview({
   providerLabel,
   initial,
   onProgress,
+  onFormChange,
+  prescriptionLines,
+  defaultDoctor,
+  onStatusChange,
 }: {
   consultationId: string | null;
   transcription: TranscriptionInfo | null;
@@ -44,6 +52,10 @@ export function ObservationReview({
   providerLabel: string;
   initial: ObservationStageData;
   onProgress?: (step: number) => void;
+  onFormChange?: (form: ObservationFormData) => void;
+  prescriptionLines: PrescriptionLine[];
+  defaultDoctor: string;
+  onStatusChange?: () => void;
 }) {
   const [form, setForm] = useState<ObservationFormData | null>(initial.form);
   const [validation, setValidation] = useState<ObservationValidationStatus | null>(initial.validationStatus);
@@ -69,6 +81,7 @@ export function ObservationReview({
     latest.current = next;
     version.current += 1;
     setForm(next);
+    onFormChange?.(next);
     setSaveState("dirty");
     setChanges((c) => c + 1);
   };
@@ -144,6 +157,7 @@ export function ObservationReview({
       version.current += 1;
       savedVersion.current = version.current;
       setForm(body.form);
+      onFormChange?.(body.form);
       setValidation(body.validationStatus);
       setSaveState("saved");
       setView("relevant");
@@ -171,6 +185,7 @@ export function ObservationReview({
       setValidation(result.validationStatus);
       setSaveState(version.current === sent ? "saved" : "dirty");
       onProgress?.(5);
+      onStatusChange?.();
     } catch {
       setError("Connexion au serveur impossible. La fiche n'a pas été validée.");
     } finally {
@@ -217,10 +232,10 @@ export function ObservationReview({
   };
 
   // --- Rendu -----------------------------------------------------------------
-  if (!consultationId || !confirmed) {
+  if (!consultationId) {
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Info className="size-4" /> Confirmez la transcription pour lancer l&apos;analyse de la fiche d&apos;observation.
+        <Info className="size-4" /> Renseignez d&apos;abord le patient : la fiche sera créée avec la consultation.
       </p>
     );
   }
@@ -238,7 +253,8 @@ export function ObservationReview({
 
   const visible = (f: FieldDef) => {
     const s = base.fields[f.path];
-    if (view === "all") return true;
+    // Les champs réservés au médecin sont toujours affichés.
+    if (view === "all" || f.ai === false) return true;
     const isPending = s?.status === "extracted" || s?.status === "needs_verification";
     if (view === "pending") return isPending;
     return isPending || (s && (!isEmptyValue(s.value) || s.aiValue !== undefined));
@@ -276,7 +292,7 @@ export function ObservationReview({
           ) : (
             <Button
               size="sm"
-              disabled={analyzing || !providerConfigured}
+              disabled={analyzing || !providerConfigured || !confirmed}
               onClick={() => (form?.extractedAt ? setConfirmReanalyze(true) : void analyze())}
             >
               {analyzing ? <Loader2 className="animate-spin" /> : form?.extractedAt ? <RotateCw /> : <Sparkles />}
@@ -284,6 +300,11 @@ export function ObservationReview({
             </Button>
           )}
         </div>
+        {!confirmed && (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Confirmez la transcription pour lancer l&apos;analyse. Vous pouvez aussi remplir la fiche manuellement (« Tous les champs »).
+          </p>
+        )}
         {!providerConfigured && (
           <p className="mt-3 text-sm text-warning">Aucun fournisseur d&apos;IA configuré (OPENAI_API_KEY absente). Vous pouvez remplir la fiche manuellement.</p>
         )}
@@ -397,7 +418,7 @@ export function ObservationReview({
 
       {/* Sections de la fiche */}
       <div className="space-y-3">
-        {SECTIONS.map((section) => (
+        {SECTIONS.filter((x) => x.key !== "decision").map((section) => (
           <ReviewSection
             key={section.key + (base.extractedAt ?? "")}
             sectionKey={section.key}
@@ -411,6 +432,14 @@ export function ObservationReview({
             onReject={reject}
             onRestore={restore}
             showEmptyHint={view !== "all"}
+            extra={
+              section.key === "trauma" ? (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Schéma des lésions</h4>
+                  <BodyMap marks={base.bodyMarks} onChange={(bodyMarks) => apply({ ...base, bodyMarks })} />
+                </div>
+              ) : undefined
+            }
           />
         ))}
         <FormSection
@@ -421,6 +450,38 @@ export function ObservationReview({
           badge={pending.medications.length ? <Badge variant="warning">{pending.medications.length} à vérifier</Badge> : undefined}
         >
           <MedicationsEditor items={base.medications} onChange={(medications) => apply({ ...base, medications })} />
+        </FormSection>
+        {SECTIONS.filter((x) => x.key === "decision").map((section) => (
+          <ReviewSection
+            key={section.key}
+            sectionKey={section.key}
+            title={section.title}
+            description={section.description}
+            form={base}
+            visible={visible}
+            transcript={transcript}
+            onChange={change}
+            onAccept={accept}
+            onReject={reject}
+            onRestore={restore}
+            showEmptyHint={false}
+            forceOpen
+          />
+        ))}
+        <FormSection
+          title="Fiche de suivi"
+          description="Appels suivants : constantes, décision, prochain rendez-vous"
+          defaultOpen={base.followUps.length > 0}
+          badge={base.followUps.length ? <Badge variant="secondary">{base.followUps.length} appel(s)</Badge> : undefined}
+        >
+          <FollowUps calls={base.followUps} defaultDoctor={defaultDoctor} onChange={(followUps) => apply({ ...base, followUps })} />
+        </FormSection>
+        <FormSection
+          title="Diagramme de soins et de surveillance"
+          description="Relevés horodatés : prescriptions, paramètres, soins réalisés"
+          defaultOpen={base.careChart.columns.length > 0}
+        >
+          <CareChart chart={base.careChart} prescriptionLines={prescriptionLines} onChange={(careChart) => apply({ ...base, careChart })} />
         </FormSection>
       </div>
 
@@ -446,6 +507,11 @@ export function ObservationReview({
           {saveState === "saved" && !error && validation === "validated" && (
             <span className="flex items-center gap-2 text-success">
               <ShieldCheck className="size-4" /> Fiche validée par le médecin. Toute modification la repassera en vérification.
+            </span>
+          )}
+          {!base.fields["decision.choice"]?.value && (
+            <span className="mb-1 flex items-center gap-2 text-warning">
+              <Info className="size-4" /> Aucune décision renseignée.
             </span>
           )}
           {saveState === "saved" && !error && validation !== "validated" && (
@@ -487,7 +553,11 @@ function ReviewSection({
   onReject,
   onRestore,
   showEmptyHint,
+  extra,
+  forceOpen,
 }: {
+  extra?: React.ReactNode;
+  forceOpen?: boolean;
   sectionKey: SectionKey;
   title: string;
   description: string;
@@ -509,10 +579,10 @@ function ReviewSection({
     <FormSection
       title={title}
       description={description}
-      defaultOpen={pendingCount > 0 || shown.length > 0}
+      defaultOpen={forceOpen || pendingCount > 0 || shown.length > 0 || Boolean(extra && form.bodyMarks.length)}
       badge={pendingCount ? <Badge variant="warning">{pendingCount} à vérifier</Badge> : undefined}
     >
-      {shown.length === 0 ? (
+      {shown.length === 0 && extra ? null : shown.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Aucun champ renseigné.{showEmptyHint && " Choisissez « Tous les champs » pour compléter manuellement."}
         </p>
@@ -542,6 +612,7 @@ function ReviewSection({
           ))}
         </div>
       )}
+      {extra && <div className={cn(shown.length > 0 && "mt-5")}>{extra}</div>}
     </FormSection>
   );
 }
