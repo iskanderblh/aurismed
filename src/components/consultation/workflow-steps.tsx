@@ -18,7 +18,7 @@ export function WorkflowSteps({ current = 0, completed = [] as number[] }) {
       {WORKFLOW_STEPS.map((step, i) => {
         const active = i === current;
         const done = completed.includes(i);
-        const available = step.phase <= 2;
+        const available = step.phase <= 3;
         return (
           <li
             key={step.key}
@@ -28,7 +28,7 @@ export function WorkflowSteps({ current = 0, completed = [] as number[] }) {
               "flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
               active && "border-primary bg-primary text-primary-foreground",
               !active && available && "bg-card",
-              !available && "border-dashed text-muted-foreground/70",
+              !available && !active && "border-dashed text-muted-foreground/70",
             )}
           >
             <span

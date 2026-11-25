@@ -137,6 +137,9 @@ export type Database = {
           transcription_error: string | null;
           delete_after: string | null;
           deleted_at: string | null;
+          source: "microphone" | "upload";
+          original_filename: string | null;
+          transcript: string | null;
           created_at: string;
         };
         Insert: {
@@ -152,6 +155,9 @@ export type Database = {
           transcription_error?: string | null;
           delete_after?: string | null;
           deleted_at?: string | null;
+          source?: "microphone" | "upload";
+          original_filename?: string | null;
+          transcript?: string | null;
           created_at?: string;
         };
         Update: {
@@ -167,6 +173,9 @@ export type Database = {
           transcription_error?: string | null;
           delete_after?: string | null;
           deleted_at?: string | null;
+          source?: "microphone" | "upload";
+          original_filename?: string | null;
+          transcript?: string | null;
           created_at?: string;
         };
         Relationships: [];

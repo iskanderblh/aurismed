@@ -9,12 +9,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { rowToDraft } from "@/lib/consultation/mapping";
 import { getConsultation } from "@/lib/data/consultations";
+import { getRecordingStageData, purgeExpiredAudio } from "@/lib/data/recordings";
+import { getCurrentUser } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import { CONSULTATION_STATUS, formatDateTime, patientDisplayName } from "@/lib/labels";
 
 export const metadata: Metadata = { title: "Consultation" };
 
 export default async function ConsultationPage({ params }: PageProps<"/consultations/[id]">) {
   const { id } = await params;
+  const user = await getCurrentUser();
+  // Applique la politique de conservation de l'audio avant d'afficher les segments.
+  await purgeExpiredAudio(await createClient()).catch((e) => console.error("[rétention]", e));
   const result = await getConsultation(id);
 
   if (!result.ok) {
@@ -29,6 +35,7 @@ export default async function ConsultationPage({ params }: PageProps<"/consultat
   const consultation = result.data;
   if (!consultation) notFound();
 
+  const recordingData = await getRecordingStageData(user.id, consultation);
   const status = CONSULTATION_STATUS[consultation.status];
   return (
     <div className="space-y-6">
@@ -47,6 +54,7 @@ export default async function ConsultationPage({ params }: PageProps<"/consultat
         initialId={consultation.id}
         initialDraft={rowToDraft(consultation)}
         lastSavedAt={consultation.updated_at}
+        recordingData={recordingData}
       />
     </div>
   );
