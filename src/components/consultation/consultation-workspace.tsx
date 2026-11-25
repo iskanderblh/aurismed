@@ -23,7 +23,9 @@ import {
   type PatientInformation,
   type VesselInformation,
 } from "@/lib/consultation/schema";
+import type { RecordingStageData } from "@/lib/recording/types";
 import { CheckboxField, ChoiceField, FormSection, TextField } from "./form-controls";
+import { RecordingStage } from "./recording/recording-stage";
 import { WorkflowSteps } from "./workflow-steps";
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
@@ -60,11 +62,19 @@ export function ConsultationWorkspace({
   initialId,
   initialDraft,
   lastSavedAt,
+  recordingData,
 }: {
   initialId: string | null;
   initialDraft: ConsultationDraftInput;
   lastSavedAt?: string;
+  recordingData: RecordingStageData;
 }) {
+  const [step, setStep] = useState(() => {
+    if (recordingData.transcription?.confirmedAt) return 3;
+    if (recordingData.recordings.length) return 2;
+    if (recordingData.consent.recordingConsentAt) return 1;
+    return 0;
+  });
   const [id, setId] = useState(initialId);
   const [draft, setDraft] = useState(initialDraft);
   const [state, setState] = useState<SaveState>(initialId ? "saved" : "idle");
@@ -108,12 +118,12 @@ export function ConsultationWorkspace({
     }
   };
 
-  const save = async () => {
+  const save = async (force = false) => {
     if (inFlight.current) {
       pending.current = true;
       return;
     }
-    if (!idRef.current && !hasContent(latest.current)) return;
+    if (!idRef.current && !force && !hasContent(latest.current)) return;
     inFlight.current = true;
     try {
       do {
@@ -126,6 +136,14 @@ export function ConsultationWorkspace({
   };
 
   const autosave = useEffectEvent(() => void save());
+
+  /** Crée le brouillon s'il n'existe pas encore (avant le premier enregistrement). */
+  const ensureId = async () => {
+    if (idRef.current) return idRef.current;
+    while (inFlight.current) await new Promise((r) => setTimeout(r, 100));
+    if (!idRef.current) await save(true);
+    return idRef.current;
+  };
 
   // Sauvegarde automatique après une pause dans la saisie.
   useEffect(() => {
@@ -175,7 +193,7 @@ export function ConsultationWorkspace({
 
   return (
     <div className="space-y-6 pb-28">
-      <WorkflowSteps current={0} />
+      <WorkflowSteps current={step} completed={Array.from({ length: step }, (_, i) => i)} />
 
       <FormSection
         title="Appel"
@@ -230,6 +248,7 @@ export function ConsultationWorkspace({
       <FormSection
         title="Navire"
         description="Tous les champs sont facultatifs"
+        defaultOpen={false}
         icon={<Ship className="size-4" />}
         badge={<Badge variant="secondary">{filledCount(v)} renseigné{filledCount(v) > 1 ? "s" : ""}</Badge>}
       >
@@ -284,13 +303,13 @@ export function ConsultationWorkspace({
         </div>
       </FormSection>
 
-      <div className="flex items-start gap-3 rounded-xl border border-dashed bg-card/60 p-5 text-sm text-muted-foreground">
-        <Mic className="mt-0.5 size-5 shrink-0" />
-        <p>
-          L&apos;enregistrement vocal et la transcription arrivent en phase 3. Les informations saisies ici sont déjà
-          enregistrées et seront reprises dans la fiche d&apos;observation.
-        </p>
-      </div>
+      <FormSection
+        title="Enregistrement et transcription"
+        description="Consentement, enregistrement de la consultation, transcription et correction"
+        icon={<Mic className="size-4" />}
+      >
+        <RecordingStage consultationId={id} ensureId={ensureId} data={recordingData} onProgress={(n) => setStep((s) => Math.max(s, n))} />
+      </FormSection>
 
       {/* Barre d'actions fixe */}
       <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-card/95 backdrop-blur lg:left-64">

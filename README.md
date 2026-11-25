@@ -14,7 +14,7 @@ corrige et valide ; l'application génère ensuite les PDF.
 | --- | --- | --- |
 | 1 | Fondation : Next.js, Tailwind, shadcn/ui, Supabase, schéma, connexion, tableau de bord | ✅ |
 | 2 | Consultation : patient, navire, brouillons, historique, paramètres | ✅ |
-| 3 | Enregistrement vocal et transcription | à venir |
+| 3 | Enregistrement vocal et transcription | ✅ |
 | 4 | Extraction IA (JSON structuré, confiance, sources) | à venir |
 | 5 | Fiche d'observation complète (BFV, bilans, décision, suivi, diagramme de soins) | à venir |
 | 6 | PDF (fiche d'observation, ordonnance) | à venir |
@@ -55,9 +55,34 @@ supabase/
   tests/                 tests d'isolation RLS sur PostgreSQL local
 ```
 
-Prévu dans les phases suivantes : `src/server/transcription/` (fournisseur de transcription
-remplaçable), `src/server/ai/` (extraction médicale), `src/server/pdf/` (documents),
-`src/lib/medical/` (schéma de la fiche d'observation).
+Transcription : `src/server/transcription/` (interface `TranscriptionProvider`, implémentation
+OpenAI, mise en paragraphes), routes `src/app/api/recordings/[id]/transcribe` et
+`src/app/api/consultations/[id]/transcription`, interface dans
+`src/components/consultation/recording/`.
+
+Prévu dans les phases suivantes : `src/server/ai/` (extraction médicale), `src/server/pdf/`
+(documents), `src/lib/medical/` (schéma de la fiche d'observation).
+
+## Enregistrement et transcription
+
+1. **Consentement** : avant le premier enregistrement, le médecin confirme l'accord du patient et
+   prend connaissance de l'envoi de l'audio et du texte au fournisseur (OpenAI). Les deux
+   horodatages sont stockés sur la consultation.
+2. **Enregistrement** (MediaRecorder) : pause, reprise, arrêt, durée, niveau audio, état du micro.
+   Toutes les 10 minutes, le segment en cours est clos et envoyé dans le bucket privé
+   `recordings`, puis un nouveau segment démarre. Un segment dont l'envoi échoue reste dans la
+   page avec un bouton Réessayer. Import de fichiers audio possible (24 Mo maximum par fichier).
+3. **Transcription** : chaque segment est envoyé séparément (langue `fr`, vocabulaire médical en
+   indication, fin du segment précédent pour la continuité), puis les textes sont assemblés et
+   mis en paragraphes sans modifier les mots. Une erreur s'affiche sur le segment concerné et la
+   transcription reprend là où elle s'est arrêtée.
+4. **Correction et confirmation** : la correction est enregistrée automatiquement. La
+   confirmation démarre le délai de conservation de l'audio (Paramètres, 30 jours par défaut,
+   0 = suppression immédiate). Les fichiers expirés sont supprimés à l'ouverture du tableau de
+   bord ou d'une consultation.
+
+Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter dans
+`src/server/transcription/index.ts` (variable `TRANSCRIPTION_PROVIDER`).
 
 ## Installation
 
@@ -71,7 +96,8 @@ cp .env.example .env.local     # puis renseignez les valeurs
 ### 1. Créer la base de données
 
 Option A, éditeur SQL de Supabase : exécutez dans l'ordre chaque fichier de
-`supabase/migrations/` (`20261125000000_initial_schema.sql`, puis `20261125010000_consultation_call_information.sql`).
+`supabase/migrations/` (`20261125000000_initial_schema.sql`, `20261125010000_consultation_call_information.sql`,
+`20261125020000_recording_transcripts.sql`).
 
 Option B, CLI Supabase :
 
@@ -114,7 +140,7 @@ npm run build && npm start   # production locale
 | `npm run build` | build de production |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | génération des types de routes + TypeScript |
-| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base |
+| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes |
 | `npm run test:db` | applique la migration sur un PostgreSQL local jetable et vérifie l'isolation RLS (nécessite `initdb`, `pg_ctl` et `psql`) |
 
 ## Services externes et identifiants

@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import { getDashboardData } from "@/lib/data/dashboard";
+import { purgeExpiredAudio } from "@/lib/data/recordings";
+import { createClient } from "@/lib/supabase/server";
 import { CONSULTATION_STATUS, DOCUMENT_TYPE, formatDateTime, patientDisplayName } from "@/lib/labels";
 
 export const metadata: Metadata = { title: "Tableau de bord" };
@@ -43,6 +45,8 @@ function EmptyState({ children }: { children: React.ReactNode }) {
 }
 
 export default async function DashboardPage() {
+  // Applique la politique de conservation de l'audio (suppression des fichiers expirés).
+  await purgeExpiredAudio(await createClient()).catch((e) => console.error("[rétention]", e));
   const [user, result] = await Promise.all([getCurrentUser(), getDashboardData()]);
   const greeting = user.fullName ? `Bonjour, ${user.fullName}` : "Bonjour";
 
