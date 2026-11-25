@@ -21,3 +21,25 @@ const dateFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", ti
 export function formatDateTime(iso: string) {
   return dateFormatter.format(new Date(iso));
 }
+
+export const TRANSCRIPTION_STATUS: Record<string, { label: string; variant: "secondary" | "warning" | "success" | "outline" | "destructive" }> = {
+  none: { label: "Aucune", variant: "outline" },
+  pending: { label: "En attente", variant: "secondary" },
+  processing: { label: "En cours", variant: "warning" },
+  completed: { label: "Transcrite", variant: "success" },
+  failed: { label: "Échec", variant: "destructive" },
+};
+
+export const OBSERVATION_STATUS: Record<string, { label: string; variant: "secondary" | "warning" | "success" | "outline" }> = {
+  none: { label: "Non commencée", variant: "outline" },
+  draft: { label: "Brouillon", variant: "secondary" },
+  ai_extracted: { label: "À vérifier", variant: "warning" },
+  in_review: { label: "En vérification", variant: "warning" },
+  validated: { label: "Validée", variant: "success" },
+};
+
+export const PRESCRIPTION_STATUS: Record<string, { label: string; variant: "secondary" | "success" | "outline" }> = {
+  none: { label: "Aucune", variant: "outline" },
+  draft: { label: "Brouillon", variant: "secondary" },
+  validated: { label: "Validée", variant: "success" },
+};
