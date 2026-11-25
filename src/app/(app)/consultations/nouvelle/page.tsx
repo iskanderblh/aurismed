@@ -1,27 +1,20 @@
 import type { Metadata } from "next";
-import { Mic } from "lucide-react";
+import { ConsultationWorkspace } from "@/components/consultation/consultation-workspace";
 import { PageHeader } from "@/components/layout/page-header";
-import { UpcomingFeature } from "@/components/layout/upcoming-feature";
+import { emptyDraft } from "@/lib/consultation/schema";
 
 export const metadata: Metadata = { title: "Nouvelle consultation" };
 
 export default function NewConsultationPage() {
+  const draft = emptyDraft();
+  // Date et heure d'appel pré-remplies côté client (fuseau du médecin) : laissées vides ici.
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <PageHeader
         title="Nouvelle consultation"
-        description="Patient, enregistrement, transcription, extraction IA, vérification, ordonnance, PDF."
+        description="Le brouillon est créé et enregistré automatiquement dès la première saisie."
       />
-      <UpcomingFeature
-        icon={Mic}
-        phase={2}
-        title="Parcours de consultation guidé"
-        points={[
-          "Informations patient et navire (fiche d'observation, page 1)",
-          "Création de la consultation et sauvegarde automatique du brouillon",
-          "Enregistrement vocal et transcription en phase 3, extraction IA en phase 4",
-        ]}
-      />
+      <ConsultationWorkspace initialId={null} initialDraft={draft} />
     </div>
   );
 }

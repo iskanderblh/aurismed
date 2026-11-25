@@ -13,7 +13,7 @@ corrige et valide ; l'application génère ensuite les PDF.
 | Phase | Contenu | État |
 | --- | --- | --- |
 | 1 | Fondation : Next.js, Tailwind, shadcn/ui, Supabase, schéma, connexion, tableau de bord | ✅ |
-| 2 | Consultation : patient, navire, brouillons, historique | à venir |
+| 2 | Consultation : patient, navire, brouillons, historique, paramètres | ✅ |
 | 3 | Enregistrement vocal et transcription | à venir |
 | 4 | Extraction IA (JSON structuré, confiance, sources) | à venir |
 | 5 | Fiche d'observation complète (BFV, bilans, décision, suivi, diagramme de soins) | à venir |
@@ -70,8 +70,8 @@ cp .env.example .env.local     # puis renseignez les valeurs
 
 ### 1. Créer la base de données
 
-Option A, éditeur SQL de Supabase : copiez le contenu de
-`supabase/migrations/20261125000000_initial_schema.sql` et exécutez-le.
+Option A, éditeur SQL de Supabase : exécutez dans l'ordre chaque fichier de
+`supabase/migrations/` (`20261125000000_initial_schema.sql`, puis `20261125010000_consultation_call_information.sql`).
 
 Option B, CLI Supabase :
 
@@ -96,8 +96,8 @@ Dans Supabase > Authentication :
 4. **Emails > Reset Password** (recommandé) : remplacez le lien par
    `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/reinitialiser-mot-de-passe`.
 
-Le nom du médecin affiché dans l'application provient de `profiles.full_name` (modifiable dans la
-table `profiles` en attendant l'écran de paramètres de la phase 2).
+Le nom du médecin, son n° RPPS, l'établissement et la durée de conservation de l'audio se règlent
+ensuite dans **Paramètres**.
 
 ### 3. Lancer l'application
 
@@ -114,6 +114,7 @@ npm run build && npm start   # production locale
 | `npm run build` | build de production |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | génération des types de routes + TypeScript |
+| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base |
 | `npm run test:db` | applique la migration sur un PostgreSQL local jetable et vérifie l'isolation RLS (nécessite `initdb`, `pg_ctl` et `psql`) |
 
 ## Services externes et identifiants

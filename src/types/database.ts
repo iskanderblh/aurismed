@@ -79,6 +79,7 @@ export type Database = {
           patient_gender: "M" | "F" | null;
           patient_information: Json;
           vessel_information: Json;
+          call_information: Json;
           consultation_date: string;
           status: ConsultationStatus;
           recording_consent_at: string | null;
@@ -95,6 +96,7 @@ export type Database = {
           patient_gender?: "M" | "F" | null;
           patient_information?: Json;
           vessel_information?: Json;
+          call_information?: Json;
           consultation_date?: string;
           status?: ConsultationStatus;
           recording_consent_at?: string | null;
@@ -111,6 +113,7 @@ export type Database = {
           patient_gender?: "M" | "F" | null;
           patient_information?: Json;
           vessel_information?: Json;
+          call_information?: Json;
           consultation_date?: string;
           status?: ConsultationStatus;
           recording_consent_at?: string | null;
