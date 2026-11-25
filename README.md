@@ -15,7 +15,7 @@ corrige et valide ; l'application génère ensuite les PDF.
 | 1 | Fondation : Next.js, Tailwind, shadcn/ui, Supabase, schéma, connexion, tableau de bord | ✅ |
 | 2 | Consultation : patient, navire, brouillons, historique, paramètres | ✅ |
 | 3 | Enregistrement vocal et transcription | ✅ |
-| 4 | Extraction IA (JSON structuré, confiance, sources) | à venir |
+| 4 | Extraction IA (JSON structuré, confiance, sources) et revue par le médecin | ✅ |
 | 5 | Fiche d'observation complète (BFV, bilans, décision, suivi, diagramme de soins) | à venir |
 | 6 | PDF (fiche d'observation, ordonnance) | à venir |
 | 7 | Tests et finalisation | à venir |
@@ -60,8 +60,11 @@ OpenAI, mise en paragraphes), routes `src/app/api/recordings/[id]/transcribe` et
 `src/app/api/consultations/[id]/transcription`, interface dans
 `src/components/consultation/recording/`.
 
-Prévu dans les phases suivantes : `src/server/ai/` (extraction médicale), `src/server/pdf/`
-(documents), `src/lib/medical/` (schéma de la fiche d'observation).
+Extraction : `src/lib/medical/` (catalogue des champs de la fiche, état et validation),
+`src/server/ai/` (schéma JSON, instructions, appel OpenAI, contrôles et fusion), route
+`src/app/api/consultations/[id]/extraction`, interface dans `src/components/consultation/observation/`.
+
+Prévu dans les phases suivantes : `src/server/pdf/` (documents).
 
 ## Enregistrement et transcription
 
@@ -83,6 +86,33 @@ Prévu dans les phases suivantes : `src/server/ai/` (extraction médicale), `src
 
 Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter dans
 `src/server/transcription/index.ts` (variable `TRANSCRIPTION_PROVIDER`).
+
+## Extraction IA et revue de la fiche
+
+1. **Catalogue unique** (`src/lib/medical/catalog.ts`) : chaque champ de la fiche de référence
+   (type, options, unités, limites plausibles) sert à la fois au formulaire, aux instructions de
+   l'IA, au schéma JSON strict et à la validation serveur. Les champs de décision et d'envoi au
+   CCMM ne sont jamais proposés à l'IA.
+2. **Analyse** : la transcription confirmée (texte corrigé) est envoyée au modèle
+   `OPENAI_EXTRACTION_MODEL` (température 0, `json_schema` strict). Chaque proposition doit
+   citer l'extrait exact de la transcription, le locuteur, la nature (rapportée, observée,
+   mesurée) et une confiance. L'IA ne doit ni inventer, ni poser de diagnostic, ni déduire une
+   posologie.
+3. **Contrôles serveur** (`src/server/ai/process.ts`) : réponse validée par Zod, valeurs
+   converties dans le type du champ (sinon écartées et listées), citation recherchée dans la
+   transcription (sinon confiance faible), constante non mesurée, confiance non élevée ou
+   contradiction → « À vérifier ». Les champs non mentionnés restent vides.
+4. **Fusion** : une nouvelle analyse ne remplace que les propositions non revues. Ce que le
+   médecin a saisi, corrigé, rejeté ou confirmé est conservé.
+5. **Revue** : pour chaque champ, accepter, corriger, rejeter (avec possibilité de rétablir) et
+   voir la source surlignée dans la transcription. Acceptation groupée possible, uniquement pour
+   les propositions à confiance élevée dont la citation a été retrouvée, sur action explicite.
+   Les médicaments cités sont proposés un par un, sans dosage déduit. La fiche est enregistrée
+   automatiquement ; la validation est refusée (côté serveur aussi) tant qu'une proposition n'a
+   pas été revue, et toute modification ultérieure la repasse en vérification.
+
+Évaluation avec le vrai fournisseur sur 8 scénarios fictifs (`src/server/ai/scenarios.ts`) :
+`OPENAI_API_KEY=… npm run eval:extraction` (les transcriptions envoyées sont synthétiques).
 
 ## Installation
 
@@ -140,7 +170,8 @@ npm run build && npm start   # production locale
 | `npm run build` | build de production |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | génération des types de routes + TypeScript |
-| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes |
+| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes, contrôles et fusion de l'extraction |
+| `npm run eval:extraction` | évaluation de l'extraction sur des scénarios fictifs avec le fournisseur réel (clé requise, appels facturés) |
 | `npm run test:db` | applique la migration sur un PostgreSQL local jetable et vérifie l'isolation RLS (nécessite `initdb`, `pg_ctl` et `psql`) |
 
 ## Services externes et identifiants

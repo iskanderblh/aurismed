@@ -101,3 +101,28 @@ export async function deleteAudioFiles(supabase: Client, rows: { id: string; sto
     );
   return rows.length;
 }
+
+export type ObservationStageData = {
+  form: import("@/lib/medical/form-state").ObservationFormData | null;
+  validationStatus: import("@/types/database").ObservationValidationStatus | null;
+  validatedAt: string | null;
+};
+
+/** Fiche d'observation enregistrée (validée par le schéma ; null si absente ou illisible). */
+export async function getObservationStageData(consultationId: string | null): Promise<ObservationStageData> {
+  if (!consultationId) return { form: null, validationStatus: null, validatedAt: null };
+  const { formDataSchema } = await import("@/lib/medical/form-state");
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("observation_forms")
+    .select("form_data, validation_status, validated_at")
+    .eq("consultation_id", consultationId)
+    .maybeSingle();
+  if (!data) return { form: null, validationStatus: null, validatedAt: null };
+  const parsed = formDataSchema.safeParse(data.form_data);
+  return {
+    form: parsed.success ? (parsed.data as import("@/lib/medical/form-state").ObservationFormData) : null,
+    validationStatus: data.validation_status,
+    validatedAt: data.validated_at,
+  };
+}

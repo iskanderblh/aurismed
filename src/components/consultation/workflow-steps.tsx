@@ -7,7 +7,7 @@ export const WORKFLOW_STEPS = [
   { key: "recording", label: "Enregistrement", phase: 3 },
   { key: "transcription", label: "Transcription", phase: 3 },
   { key: "extraction", label: "Extraction IA", phase: 4 },
-  { key: "review", label: "Vérification", phase: 5 },
+  { key: "review", label: "Vérification", phase: 4 },
   { key: "prescription", label: "Ordonnance", phase: 5 },
   { key: "export", label: "PDF", phase: 6 },
 ] as const;
@@ -18,7 +18,7 @@ export function WorkflowSteps({ current = 0, completed = [] as number[] }) {
       {WORKFLOW_STEPS.map((step, i) => {
         const active = i === current;
         const done = completed.includes(i);
-        const available = step.phase <= 3;
+        const available = step.phase <= 4;
         return (
           <li
             key={step.key}
