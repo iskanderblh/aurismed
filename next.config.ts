@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 // cacheComponents reste désactivé, toutes les pages authentifiées sont rendues à la requête.
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // React PDF (génération des PDF côté serveur) est chargé tel quel par Node.
+  serverExternalPackages: ["@react-pdf/renderer"],
   turbopack: {
     rules: {
       "*.css": {

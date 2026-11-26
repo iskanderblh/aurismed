@@ -17,7 +17,7 @@ corrige et valide ; l'application génère ensuite les PDF.
 | 3 | Enregistrement vocal et transcription | ✅ |
 | 4 | Extraction IA (JSON structuré, confiance, sources) et revue par le médecin | ✅ |
 | 5 | Fiche d'observation complète (décision, schéma des lésions, suivi, diagramme de soins) et ordonnance | ✅ |
-| 6 | PDF (fiche d'observation, ordonnance) | à venir |
+| 6 | PDF (fiche d'observation, ordonnance), page Documents | ✅ |
 | 7 | Tests et finalisation | à venir |
 
 ## Pile technique
@@ -26,7 +26,7 @@ corrige et valide ; l'application génère ensuite les PDF.
 - **Tailwind CSS 4**, composants **shadcn/ui** (style new-york, Radix UI), icônes **Lucide**
 - **Supabase** : PostgreSQL, Auth, Row Level Security, Storage privé
 - **Zod** pour la validation des entrées
-- À venir : API OpenAI (transcription et extraction), **@react-pdf/renderer** (PDF)
+- API OpenAI (transcription et extraction), **@react-pdf/renderer** (PDF générés côté serveur)
 
 ## Architecture
 
@@ -64,7 +64,9 @@ Extraction : `src/lib/medical/` (catalogue des champs de la fiche, état et vali
 `src/server/ai/` (schéma JSON, instructions, appel OpenAI, contrôles et fusion), route
 `src/app/api/consultations/[id]/extraction`, interface dans `src/components/consultation/observation/`.
 
-Prévu dans les phases suivantes : `src/server/pdf/` (documents).
+PDF : `src/server/pdf/` (mise en forme testée dans `model.ts`, gabarits React PDF, génération et
+stockage dans `generate.ts`), routes `src/app/api/consultations/[id]/documents` (génération) et
+`src/app/api/documents/[id]` (ouverture / téléchargement), page `src/app/(app)/documents`.
 
 ## Enregistrement et transcription
 
@@ -133,6 +135,25 @@ Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter 
 - **Statut de la consultation** : « Validée » quand la fiche et l'ordonnance sont validées ;
   toute modification ultérieure la repasse « En cours » (`src/lib/data/consultation-status.ts`).
 
+## Documents PDF
+
+- **Uniquement des données validées** : la fiche d'observation n'est générée qu'une fois validée
+  par le médecin, l'ordonnance qu'une fois validée et avec au moins un médicament. Les champs vides
+  ne sont pas imprimés ; aucune valeur n'est ajoutée.
+- **Fiche d'observation** : identification (appel, patient, navire), sections de la fiche de
+  référence, schéma des lésions annoté, prescriptions, décision, fiche de suivi, et le diagramme
+  de soins sur une page en paysage. Pied de page : médecin, date de validation, version, pagination.
+- **Ordonnance** : médecin et établissement (Paramètres), patient, âge, date, allergie signalée,
+  lignes (nom, dosage, posologie, durée, motif), consignes, zone de signature.
+- **Versions** : chaque génération crée une nouvelle version (unicité garantie en base) ; les
+  anciennes restent consultables. Un avertissement apparaît si la fiche ou l'ordonnance a été
+  validée à nouveau depuis le dernier PDF.
+- **Accès** : fichiers dans le bucket privé `documents` (`<user_id>/<consultation_id>/`). Ouvrir ou
+  télécharger passe par `/api/documents/[id]`, qui vérifie l'accès (RLS) puis redirige vers une URL
+  signée valable 60 secondes. Génération et téléchargement sont journalisés.
+- Les heures affichées utilisent `NEXT_PUBLIC_APP_TIME_ZONE` (Europe/Paris par défaut) ; le PDF
+  utilise le fuseau du navigateur du médecin.
+
 ## Installation
 
 Prérequis : Node.js 20.9 ou plus récent, un projet Supabase (l'offre gratuite suffit).
@@ -146,7 +167,7 @@ cp .env.example .env.local     # puis renseignez les valeurs
 
 Option A, éditeur SQL de Supabase : exécutez dans l'ordre chaque fichier de
 `supabase/migrations/` (`20261125000000_initial_schema.sql`, `20261125010000_consultation_call_information.sql`,
-`20261125020000_recording_transcripts.sql`).
+`20261125020000_recording_transcripts.sql`, `20261125030000_document_versions.sql`).
 
 Option B, CLI Supabase :
 
@@ -189,7 +210,7 @@ npm run build && npm start   # production locale
 | `npm run build` | build de production |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | génération des types de routes + TypeScript |
-| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes, contrôles et fusion de l'extraction, règles de l'ordonnance |
+| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes, contrôles et fusion de l'extraction, règles de l'ordonnance, mise en forme et rendu des PDF (contenu vérifié avec `pdftotext` s'il est installé) |
 | `npm run eval:extraction` | évaluation de l'extraction sur des scénarios fictifs avec le fournisseur réel (clé requise, appels facturés) |
 | `npm run test:db` | applique la migration sur un PostgreSQL local jetable et vérifie l'isolation RLS (nécessite `initdb`, `pg_ctl` et `psql`) |
 
@@ -209,13 +230,13 @@ exposée : l'accès aux données est contrôlé par la RLS.
 - RLS sur toutes les tables : chaque médecin n'accède qu'à ses propres lignes ; les tables liées
   vérifient en plus que la consultation lui appartient. Aucun accès anonyme.
 - Fichiers audio et PDF dans des buckets **privés**, rangés par utilisateur, sans URL publique
-  (accès par URL signée de courte durée dans les phases suivantes).
-- Journal d'audit en ajout seul (connexion, déconnexion, changement de mot de passe ; les actions
-  sur les documents s'y ajouteront).
+  (accès par URL signée de courte durée).
+- Journal d'audit en ajout seul : connexion, déconnexion, changement de mot de passe, analyse IA,
+  validations, génération et téléchargement des documents (métadonnées uniquement).
 - En-têtes de sécurité (`X-Frame-Options`, `nosniff`, `Permissions-Policy` limitant le micro au
   site), pages authentifiées en `Cache-Control: private, no-store`, pas d'indexation.
-- Prévu : consentement explicite à l'enregistrement, information sur la transmission de l'audio
-  et de la transcription au fournisseur d'IA, rétention configurable de l'audio.
+- Consentement explicite à l'enregistrement, information sur la transmission de l'audio et de la
+  transcription au fournisseur d'IA, rétention configurable de l'audio.
 
 **Utilisez uniquement des données synthétiques en développement et en test.** Cette application
 n'a fait l'objet d'aucune évaluation réglementaire (RGPD, hébergement de données de santé,

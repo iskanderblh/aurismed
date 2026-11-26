@@ -126,7 +126,9 @@ export default async function DashboardPage() {
                       <li key={d.id} className="flex items-center gap-3 py-3">
                         <FileText className="size-4 text-sky-600" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">{DOCUMENT_TYPE[d.document_type]}</p>
+                          <a href={`/api/documents/${d.id}`} target="_blank" rel="noopener" className="block truncate text-sm font-medium hover:underline">
+                            {DOCUMENT_TYPE[d.document_type]}
+                          </a>
                           <p className="truncate text-xs text-muted-foreground">
                             {d.consultations ? patientDisplayName(d.consultations) : "—"} · {formatDateTime(d.created_at)}
                           </p>

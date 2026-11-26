@@ -5,28 +5,7 @@ import { Button } from "@/components/ui/button";
 import type { CareChart as Chart } from "@/lib/medical/form-state";
 import type { PrescriptionLine } from "@/lib/prescription/schema";
 import { formatLocalDateTime, nowLocal } from "./field-editor";
-
-export const SURVEILLANCE_ROWS = [
-  { key: "ta", label: "Tension artérielle" },
-  { key: "fc", label: "Fréquence cardiaque (/min)" },
-  { key: "fr", label: "Fréquence respiratoire (/min)" },
-  { key: "temp", label: "Température (°C)" },
-  { key: "pain", label: "Douleur EN (/10)" },
-  { key: "glycemia", label: "Glycémie (g/L)" },
-  { key: "diuresis", label: "Diurèse (ml)" },
-  { key: "stools", label: "Selles" },
-] as const;
-
-export const CARE_ROWS = [
-  { key: "dressing", label: "Pansement / Désinfection" },
-  { key: "suture", label: "Suture / Agrafes" },
-  { key: "injection", label: "Injection" },
-  { key: "ecg", label: "ECG" },
-  { key: "bu", label: "Bandelette urinaire" },
-  { key: "malaria", label: "Test paludisme" },
-  { key: "photo", label: "Photo" },
-  { key: "advice", label: "Consultation / Avis médical" },
-] as const;
+import { CARE_ROWS, SURVEILLANCE_ROWS } from "@/lib/medical/care-chart";
 
 const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `c-${Date.now()}`);
 

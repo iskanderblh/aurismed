@@ -1,4 +1,5 @@
 import type { ConsultationStatus, DocumentType } from "@/types/database";
+import { formatInZone } from "./time";
 
 export const CONSULTATION_STATUS: Record<ConsultationStatus, { label: string; variant: "secondary" | "warning" | "success" | "outline" }> = {
   draft: { label: "Brouillon", variant: "outline" },
@@ -17,9 +18,8 @@ export function patientDisplayName(c: { patient_name: string | null; patient_fir
   return name || "Patient non renseigné";
 }
 
-const dateFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 export function formatDateTime(iso: string) {
-  return dateFormatter.format(new Date(iso));
+  return formatInZone(iso, { dateStyle: "medium", timeStyle: "short" });
 }
 
 export const TRANSCRIPTION_STATUS: Record<string, { label: string; variant: "secondary" | "warning" | "success" | "outline" | "destructive" }> = {

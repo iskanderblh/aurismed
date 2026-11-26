@@ -6,29 +6,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BODY_MARK_KINDS, type BodyMark, type BodyMarkKind } from "@/lib/medical/form-state";
 import { cn } from "@/lib/utils";
+import { BODY_HEAD, BODY_MARK_COLORS, BODY_PATHS } from "@/lib/medical/body-shape";
 
-const COLORS: Record<BodyMarkKind, string> = {
-  douleur: "#d97706",
-  plaie: "#dc2626",
-  hematome: "#7c3aed",
-  fracture: "#0b2a5b",
-  brulure: "#ea580c",
-  autre: "#475569",
-};
+const COLORS = BODY_MARK_COLORS as Record<BodyMarkKind, string>;
 
 const newId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `b-${Date.now()}`);
 
-/** Silhouette simplifiée (face ou dos), dans un repère 100 × 220. */
 function Silhouette() {
   return (
     <g fill="#f1f5f9" stroke="#94a3b8" strokeWidth="0.8">
-      <circle cx="50" cy="16" r="11" />
-      <rect x="45" y="26" width="10" height="7" />
-      <path d="M30 34 h40 l4 4 v52 l-6 18 h-36 l-6 -18 v-52 z" />
-      <path d="M30 36 l-12 8 l-8 52 l6 2 l10 -46 l6 -6 z" />
-      <path d="M70 36 l12 8 l8 52 l-6 2 l-10 -46 l-6 -6 z" />
-      <path d="M33 108 h16 l-2 58 l-2 44 h-10 l0 -44 z" />
-      <path d="M51 108 h16 l-2 58 l0 44 h-10 l-2 -44 z" />
+      <circle {...BODY_HEAD} />
+      {BODY_PATHS.map((d) => (
+        <path key={d} d={d} />
+      ))}
     </g>
   );
 }
