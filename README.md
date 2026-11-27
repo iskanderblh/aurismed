@@ -25,7 +25,7 @@ Passage au tout-local et spécialisation urologie :
 | 1 | Architecture locale : base SQLite, comptes locaux, fichiers chiffrés, `LocalMedicalAIService` (whisper.cpp, Ollama), lanceur des moteurs, page « Moteur IA local », scripts Windows | ✅ |
 | 2 | Transcription progressive (VAD, segments chevauchants, texte stable et provisoire, locuteurs) | fait |
 | 3 | Extraction incrémentale, réconciliation, statuts de champ, lien valeur / segment | fait |
-| 4 | Spécialisation urologie (taxonomie des symptômes, fiche, alertes, espace à trois panneaux) | à venir |
+| 4 | Spécialisation urologie (taxonomie des symptômes, fiche, alertes, espace à trois panneaux) | fait |
 | 5 | Documents urologie, sauvegardes, conservation et effacement | à venir |
 | 6 | Parcours complet sur 14 cas urologiques synthétiques, hors ligne | à venir |
 
@@ -177,7 +177,38 @@ ligne ne doit être ajouté.
    automatiquement ; la validation est refusée (côté serveur aussi) tant qu'une proposition n'a
    pas été revue, et toute modification ultérieure la repasse en vérification.
 
-Évaluation du modèle local sur 8 scénarios fictifs (`src/server/ai/scenarios.ts`) :
+## Urologie
+
+La consultation d'urologie est le parcours principal ; le contexte maritime (BFV, bilan lésionnel,
+bilan médical, décision CCMM, suivi, diagramme de soins) devient une option de la fiche, désactivée
+pour une nouvelle consultation et conservée pour une fiche qui contient déjà ces données.
+
+- **Taxonomie** (`src/lib/urology/taxonomy.ts`) : 99 symptômes en 10 catégories (remplissage,
+  miction, volume, douleur, aspect des urines, infection, prostate, organes génitaux masculins,
+  urologie féminine, antécédents), avec terme médical, synonymes et expressions de patients,
+  description et caractéristiques à documenter. Le médecin ajoute ses termes et des synonymes dans
+  *Paramètres > Taxonomie urologique* (table `urology_terms`, propre à chaque médecin) ; ils sont
+  transmis au modèle local et servent à la recherche dans la fiche.
+- **Fiche** : motif (13 motifs), histoire de la maladie, examen clinique urologique, examens
+  complémentaires (BU, ECBU, créatinine, DFG, PSA, NFS, CRP, échographies, scanner, débitmétrie,
+  RPM, cystoscopie), puis antécédents et conclusion.
+- **Symptômes** : chacun avec présence (présent, absent, incertain ; « non mentionné » s'il n'est
+  pas listé), expression d'origine, caractéristiques (durée, fréquence, intensité, côté...),
+  interlocuteur, réplique citée et statut. Ils suivent les règles des champs : jamais modifiés une
+  fois documentés, une information contraire devient une contradiction à trancher, rien n'est
+  validé sans revue du médecin.
+- **Examen clinique** : un champ d'examen n'est proposé que si le médecin l'énonce lui-même
+  (interlocuteur de la réplique identifié comme médecin, constatation ou mesure) et reste « à
+  vérifier ». Un examen non mentionné n'est jamais déduit normal. L'IA ne prescrit aucun examen.
+- **Signes d'alerte** (`src/lib/urology/alerts.ts`) : rétention aiguë, anurie, fièvre avec douleur
+  lombaire ou du flanc (ou température ≥ 38 °C), hématurie avec caillots, douleur testiculaire
+  brutale ou intense, traumatisme urologique. Ils demandent une relecture (« Vu par le médecin »,
+  exigé avant validation, aussi côté serveur) et ne posent aucun diagnostic ni triage.
+- **Espace de travail** : sur grand écran, trois panneaux repliables : patient à gauche, audio et
+  transcription en direct au centre, fiche à droite. Un panneau replié reste monté : un
+  enregistrement en cours n'est jamais interrompu. Sur écran plus petit, une seule colonne.
+
+Évaluation du modèle local sur 9 scénarios fictifs (dont un d'urologie) (`src/server/ai/scenarios.ts`) :
 `npm run eval:extraction` (Ollama démarré, `OLLAMA_MODEL` défini ou modèle choisi dans Paramètres).
 
 ## Décision, suivi et ordonnance
