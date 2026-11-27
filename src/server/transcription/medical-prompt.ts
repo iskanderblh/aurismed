@@ -3,12 +3,12 @@
  * l'orthographe du vocabulaire médical sans dicter de contenu.
  */
 export const MEDICAL_VOCABULARY_HINT =
-  "Téléconsultation médicale maritime en français entre un médecin et un patient ou un soignant à bord. " +
-  "Vocabulaire possible : fréquence cardiaque, fréquence respiratoire, tension artérielle systolique et diastolique, " +
-  "saturation, glycémie, température, échelle numérique de la douleur, Glasgow, pupilles réactives, cyanose, marbrures, " +
-  "temps de recoloration cutanée, fosse iliaque droite, hypochondre, épigastre, défense abdominale, nausées, vomissements, " +
-  "dyspnée, tachycardie, bradycardie, syncope, convulsions, traumatisme crânien, fracture ouverte, garrot, " +
-  "paracétamol, ibuprofène, amoxicilline, morphine, CCMM, CROSS, SAMU, EVASAN, EVAMED, PLS, RCP.";
+  "Consultation d'urologie en français entre un médecin et un patient. " +
+  "Vocabulaire possible : pollakiurie, nycturie, urgenturie, dysurie, brûlures mictionnelles, rétention urinaire, anurie, " +
+  "jet faible, gouttes retardataires, résidu post-mictionnel, incontinence, hématurie, caillots, urines troubles, pyurie, " +
+  "colique néphrétique, douleur lombaire, fosse lombaire, sus-pubien, testicule, scrotum, prostate, toucher rectal, " +
+  "bandelette urinaire, ECBU, créatinine, DFG, PSA, NFS, CRP, échographie rénale, vésicale et prostatique, uroscanner, " +
+  "débitmétrie, cystoscopie, sonde urinaire, tamsulosine, alfuzosine, finastéride, paracétamol, fosfomycine, ofloxacine.";
 
 /** Garde les derniers caractères du texte précédent, coupés sur une limite de mot. */
 export function continuityPrompt(previousText: string | undefined, maxChars = 600): string {

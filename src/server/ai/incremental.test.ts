@@ -22,7 +22,7 @@ const item = (p: Partial<Item> & Pick<Item, "path" | "value" | "source_quote">):
   segment: null,
   ...p,
 });
-const out = (fields: Item[], extra: Partial<AiOutput> = {}): AiOutput => ({ fields, medications: [], contradictions: [], missing_important: [], ...extra });
+const out = (fields: Item[], extra: Partial<AiOutput> = {}): AiOutput => ({ fields, symptoms: [], medications: [], contradictions: [], missing_important: [], ...extra });
 
 describe("analyse au fil de la consultation", () => {
   it("rattache chaque valeur à sa réplique, même si le numéro donné par le modèle est faux", () => {

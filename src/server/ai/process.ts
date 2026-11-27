@@ -1,4 +1,7 @@
-import { FIELD_BY_PATH, FIELDS } from "@/lib/medical/catalog";
+import { FIELD_BY_PATH, FIELDS, isMaritimeField, type FieldDef } from "@/lib/medical/catalog";
+import { applySymptomProposals } from "@/lib/urology/symptoms";
+import { SYMPTOMS, type SymptomDef } from "@/lib/urology/taxonomy";
+import { buildSymptomProposals } from "./symptoms";
 import {
   emptyFormData,
   isEmptyValue,
@@ -22,6 +25,26 @@ export function quoteInTranscript(quote: string, normalizedTranscript: string) {
   return pieces.length > 0 && pieces.every((p) => normalizedTranscript.includes(p));
 }
 
+/**
+ * Règles propres au champ : contexte maritime désactivé (champ ignoré) et
+ * constatations d'examen clinique (seulement énoncées par le médecin, toujours
+ * à confirmer par lui).
+ */
+export function fieldRule(
+  def: FieldDef,
+  item: { speaker: string; kind: string },
+  options: { maritime?: boolean },
+): { skip: true } | { skip: false; discard?: string; needsCheck: boolean; notes: string[] } {
+  if (options.maritime === false && isMaritimeField(def)) return { skip: true };
+  if (def.clinicalExam) {
+    if (item.speaker !== "doctor" || (item.kind !== "observed" && item.kind !== "measured")) {
+      return { skip: false, discard: "constatation d'examen non énoncée par le médecin", needsCheck: true, notes: [] };
+    }
+    return { skip: false, needsCheck: true, notes: ["Constatation d'examen : à confirmer par le médecin."] };
+  }
+  return { skip: false, needsCheck: false, notes: [] };
+}
+
 const sameValue = (a: FieldValue | null | undefined, b: FieldValue | null | undefined) =>
   JSON.stringify(Array.isArray(a) ? [...a].sort() : a) === JSON.stringify(Array.isArray(b) ? [...b].sort() : b);
 
@@ -37,7 +60,7 @@ export function processExtraction(
   output: AiOutput,
   transcript: string,
   previous: ObservationFormData | null,
-  meta: { model: string; now?: Date } = { model: "unknown" },
+  meta: { model: string; now?: Date; maritime?: boolean; taxonomy?: SymptomDef[] } = { model: "unknown" },
 ): ObservationFormData {
   const prev = previous ?? emptyFormData();
   const normalizedTranscript = normalizeForMatch(transcript);
@@ -57,13 +80,19 @@ export function processExtraction(
   for (const item of output.fields) {
     const field = FIELD_BY_PATH.get(item.path);
     if (!field || field.ai === false) continue;
+    const rule = fieldRule(field, item, meta);
+    if (rule.skip) continue;
+    if (rule.discard) {
+      result.discarded.push({ path: item.path, value: item.value, reason: rule.discard });
+      continue;
+    }
     const normalized = normalizeValue(field, item.value);
     if (!normalized.ok) {
       result.discarded.push({ path: item.path, value: item.value, reason: normalized.reason });
       continue;
     }
-    const notes: string[] = [];
-    let needsCheck = item.confidence !== "high";
+    const notes: string[] = [...rule.notes];
+    let needsCheck = item.confidence !== "high" || rule.needsCheck;
     if (!quoteInTranscript(item.source_quote, normalizedTranscript)) {
       notes.push("Citation introuvable dans la transcription : à vérifier.");
       needsCheck = true;
@@ -103,6 +132,11 @@ export function processExtraction(
   for (const field of FIELDS) {
     const before = prev.fields[field.path];
     const ai = proposed.get(field.path);
+    // Sans contexte maritime, ces champs ne sont pas analysés : leur état antérieur est conservé tel quel.
+    if (meta.maritime === false && isMaritimeField(field)) {
+      if (before) result.fields[field.path] = before;
+      continue;
+    }
     if (field.ai === false || before?.status === "manual" || before?.status === "confirmed") {
       // Le médecin garde la main : la nouvelle proposition est seulement mémorisée.
       if (before) {
@@ -165,6 +199,17 @@ export function processExtraction(
       };
     });
   result.medications = [...kept, ...meds];
+  // Symptômes : jamais retirés ni remplacés en silence (mêmes règles qu'au fil de la consultation).
+  const built = buildSymptomProposals(
+    output.symptoms,
+    (quote) => ({ found: quoteInTranscript(quote, normalizedTranscript) }),
+    meta.taxonomy ?? SYMPTOMS,
+  );
+  result.symptoms = applySymptomProposals(prev.symptoms ?? {}, built.proposals).symptoms;
+  result.discarded.push(...built.discarded);
+  if (prev.maritime !== undefined) result.maritime = prev.maritime;
+  if (prev.alertsReviewed) result.alertsReviewed = prev.alertsReviewed;
+  if (prev.live) result.live = prev.live;
   result.contradictions = output.contradictions.map((c) => ({ paths: c.paths, description: c.description, quotes: c.quotes }));
   result.missing = output.missing_important.filter((m) => !proposed.has(m.path));
   return result;

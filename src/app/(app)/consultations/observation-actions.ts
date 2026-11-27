@@ -4,6 +4,7 @@ import { createClient } from "@/server/db/client";
 import { UUID_RE } from "@/lib/data/consultations";
 import { syncConsultationStatus } from "@/lib/data/consultation-status";
 import { formDataSchema, pendingReview, type ObservationFormData } from "@/lib/medical/form-state";
+import { computeAlerts } from "@/lib/urology/alerts";
 import type { Json, ObservationValidationStatus } from "@/types/database";
 
 type Fail = { ok: false; error: string };
@@ -52,6 +53,8 @@ export async function validateObservationForm(consultationId: string, form: Obse
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Fiche invalide." };
   const pending = pendingReview(parsed.data as ObservationFormData);
   if (pending.total > 0) return { ok: false, error: `${pending.total} proposition(s) de l'IA ou contradiction(s) restent à revoir (accepter, modifier, rejeter ou trancher).` };
+  const unseen = computeAlerts(parsed.data as ObservationFormData).filter((a) => !parsed.data.alertsReviewed?.[a.id]);
+  if (unseen.length) return { ok: false, error: `Signe(s) d'alerte à revoir avant validation : ${unseen.map((a) => a.title).join(", ")}.` };
 
   const now = new Date().toISOString();
   const { data, error } = await c.db

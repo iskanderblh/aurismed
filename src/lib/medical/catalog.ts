@@ -27,19 +27,51 @@ export type FieldDef = {
   ai?: boolean;
   /** Indication donnée à l'IA en plus du libellé. */
   hint?: string;
+  /**
+   * Constatation d'examen clinique : l'IA ne peut la proposer que si le médecin
+   * l'a énoncée (speaker doctor, kind observed ou measured), et elle reste
+   * toujours « À vérifier » : seul le médecin la confirme.
+   */
+  clinicalExam?: boolean;
 };
 
-export type SectionKey = "history" | "vitals" | "trauma" | "medical" | "exam" | "teleconsultation" | "decision";
+export type SectionKey =
+  | "uro_reason"
+  | "history"
+  | "uro_history"
+  | "uro_exam"
+  | "uro_investigations"
+  | "vitals"
+  | "trauma"
+  | "medical"
+  | "exam"
+  | "teleconsultation"
+  | "decision";
 
-export const SECTIONS: { key: SectionKey; title: string; description: string }[] = [
-  { key: "history", title: "Antécédents et histoire de la maladie", description: "Page 1 de la fiche" },
-  { key: "vitals", title: "Bilan des fonctions vitales (BFV)", description: "Neurologique, respiratoire, circulatoire" },
-  { key: "trauma", title: "Douleur et bilan lésionnel", description: "Examen d'un blessé / traumatisé" },
-  { key: "medical", title: "Bilan médical", description: "Bilan d'un malade" },
-  { key: "exam", title: "Examen clinique", description: "Constatations de l'examen" },
-  { key: "teleconsultation", title: "Téléconsultation médicale", description: "Conclusion, hypothèses, surveillance, actes" },
-  { key: "decision", title: "Décision", description: "Réservée au médecin : jamais proposée par l'IA" },
+export type SectionDef = {
+  key: SectionKey;
+  title: string;
+  description: string;
+  /** Partie de la fiche maritime (CCMM) : affichée seulement si le contexte maritime est activé. */
+  maritime?: boolean;
+};
+
+/** Ordre de la fiche : urologie d'abord, puis conclusion ; le contexte maritime est optionnel. */
+export const SECTIONS: SectionDef[] = [
+  { key: "uro_reason", title: "Motif de consultation", description: "Un ou plusieurs motifs, tels qu'exprimés" },
+  { key: "history", title: "Antécédents généraux", description: "Antécédents, allergies, traitements en cours" },
+  { key: "uro_history", title: "Histoire de la maladie", description: "Début, durée, évolution, épisodes précédents, traitements" },
+  { key: "uro_exam", title: "Examen clinique urologique", description: "Constatations énoncées par le médecin, à confirmer par lui" },
+  { key: "uro_investigations", title: "Examens complémentaires", description: "Résultats énoncés ou saisis ; aucun examen n'est prescrit par l'IA" },
+  { key: "exam", title: "Autres constatations d'examen", description: "Texte libre" },
+  { key: "teleconsultation", title: "Conclusion et suivi", description: "Hypothèses du médecin, surveillance, actes" },
+  { key: "vitals", title: "Bilan des fonctions vitales (BFV)", description: "Contexte maritime : neurologique, respiratoire, circulatoire", maritime: true },
+  { key: "trauma", title: "Douleur et bilan lésionnel", description: "Contexte maritime : blessé / traumatisé", maritime: true },
+  { key: "medical", title: "Bilan médical", description: "Contexte maritime : bilan d'un malade", maritime: true },
+  { key: "decision", title: "Décision", description: "Réservée au médecin : jamais proposée par l'IA", maritime: true },
 ];
+
+export const SECTION_BY_KEY = new Map(SECTIONS.map((x) => [x.key, x]));
 
 const yesno = (section: SectionKey, group: string, path: string, label: string, extra: Partial<FieldDef> = {}): FieldDef => ({
   path,
@@ -61,7 +93,95 @@ export const DECISION_OPTIONS: Option[] = [
   o("evamed", "Évacuation médicalisée (EVAMED)"),
 ];
 
+const REASONS: Option[] = [
+  o("troubles_urinaires", "Troubles urinaires"),
+  o("douleurs_lombaires", "Douleurs lombaires"),
+  o("colique_nephretique", "Colique néphrétique"),
+  o("hematurie", "Hématurie"),
+  o("infection_urinaire", "Infection urinaire"),
+  o("retention_urinaire", "Rétention urinaire"),
+  o("incontinence", "Incontinence"),
+  o("trouble_prostatique", "Trouble prostatique"),
+  o("douleurs_pelviennes", "Douleurs pelviennes"),
+  o("douleurs_testiculaires", "Douleurs testiculaires"),
+  o("troubles_sexuels", "Troubles sexuels"),
+  o("infertilite", "Infertilité"),
+  o("autres", "Autres"),
+];
+
+const examText = (path: string, label: string, hint?: string): FieldDef => ({
+  path,
+  label,
+  type: "longtext",
+  section: "uro_exam",
+  group: "Examen clinique",
+  clinicalExam: true,
+  hint: `Seulement ce que le médecin dit avoir constaté à l'examen. Ne jamais déduire un examen normal d'une absence de mention.${hint ? ` ${hint}` : ""}`,
+});
+const result = (path: string, label: string, extra: Partial<FieldDef> = {}): FieldDef => ({
+  path,
+  label,
+  type: "text",
+  section: "uro_investigations",
+  group: "Examens complémentaires",
+  hint: "Seulement un résultat explicitement énoncé (valeur, date). Ne jamais inventer de résultat ni proposer d'examen.",
+  ...extra,
+});
+
 export const FIELDS: FieldDef[] = [
+  // --- Urologie : motif ------------------------------------------------------
+  {
+    path: "uro.reasons", label: "Motif(s) de consultation", type: "multi", section: "uro_reason", group: "Motif", options: REASONS,
+    hint: "Motif réellement exprimé dans la conversation. « autres » si aucun ne correspond (préciser dans le champ suivant).",
+  },
+  { path: "uro.reasonDetail", label: "Motif tel qu'exprimé", type: "text", section: "uro_reason", group: "Motif", hint: "Reformulation fidèle et courte du motif." },
+
+  // --- Urologie : histoire de la maladie ---------------------------------------
+  { path: "uro.history.onset", label: "Date de début", type: "text", section: "uro_history", group: "Chronologie", hint: "Telle qu'énoncée (« il y a trois jours », « depuis lundi »)." },
+  { path: "uro.history.duration", label: "Durée", type: "text", section: "uro_history", group: "Chronologie" },
+  {
+    path: "uro.history.evolution", label: "Évolution", type: "choice", section: "uro_history", group: "Chronologie",
+    options: [o("amelioration", "En amélioration"), o("stable", "Stable"), o("aggravation", "En aggravation"), o("fluctuante", "Fluctuante")],
+  },
+  { path: "uro.history.initialSymptoms", label: "Symptômes initiaux", type: "longtext", section: "uro_history", group: "Description" },
+  { path: "uro.history.associatedSymptoms", label: "Symptômes associés", type: "longtext", section: "uro_history", group: "Description" },
+  { path: "uro.history.previousEpisodes", label: "Épisodes précédents", type: "longtext", section: "uro_history", group: "Description" },
+  { path: "uro.history.treatmentsTried", label: "Traitements déjà utilisés", type: "longtext", section: "uro_history", group: "Traitements" },
+  { path: "uro.history.treatmentResponse", label: "Réponse aux traitements", type: "longtext", section: "uro_history", group: "Traitements" },
+
+  // --- Urologie : examen clinique (constatations du médecin uniquement) --------
+  { ...examText("uro.exam.general", "État général"), type: "text" },
+  { path: "uro.exam.temperature", label: "Température", type: "number", unit: "°C", min: 30, max: 45, section: "uro_exam", group: "Constantes", requiresMeasurement: true, clinicalExam: true },
+  { path: "uro.exam.systolic", label: "Tension artérielle systolique", type: "number", unit: "mmHg", min: 40, max: 300, section: "uro_exam", group: "Constantes", requiresMeasurement: true, clinicalExam: true },
+  { path: "uro.exam.diastolic", label: "Tension artérielle diastolique", type: "number", unit: "mmHg", min: 20, max: 200, section: "uro_exam", group: "Constantes", requiresMeasurement: true, clinicalExam: true },
+  { path: "uro.exam.heartRate", label: "Fréquence cardiaque", type: "number", unit: "/min", min: 20, max: 250, section: "uro_exam", group: "Constantes", requiresMeasurement: true, clinicalExam: true },
+  examText("uro.exam.abdomen", "Examen abdominal"),
+  examText("uro.exam.lumbar", "Examen des fosses lombaires", "Préciser le côté (ébranlement, contact lombaire) tel qu'énoncé."),
+  examText("uro.exam.suprapubic", "Examen sus-pubien", "Globe vésical seulement s'il est constaté."),
+  examText("uro.exam.genitalia", "Examen des organes génitaux externes"),
+  examText("uro.exam.testes", "Examen testiculaire"),
+  examText("uro.exam.prostate", "Examen prostatique (toucher rectal)", "Seulement si le toucher rectal a été réalisé et décrit."),
+  examText("uro.exam.other", "Autres observations"),
+
+  // --- Urologie : examens complémentaires (résultats énoncés) -------------------
+  result("uro.lab.dipstick", "Bandelette urinaire"),
+  result("uro.lab.ecbu", "ECBU"),
+  result("uro.lab.urineAnalysis", "Analyse urinaire"),
+  result("uro.lab.creatinine", "Créatinine", { type: "number", unit: "µmol/L", min: 5, max: 3000 }),
+  result("uro.lab.egfr", "DFG", { type: "number", unit: "mL/min/1,73 m²", min: 1, max: 200 }),
+  result("uro.lab.psa", "PSA", { type: "number", unit: "ng/mL", min: 0, max: 10000 }),
+  result("uro.lab.psaDate", "Date du PSA"),
+  result("uro.lab.cbc", "NFS"),
+  result("uro.lab.crp", "CRP", { type: "number", unit: "mg/L", min: 0, max: 1000 }),
+  result("uro.imaging.renalUs", "Échographie rénale", { type: "longtext" }),
+  result("uro.imaging.bladderUs", "Échographie vésicale", { type: "longtext" }),
+  result("uro.imaging.prostateUs", "Échographie prostatique", { type: "longtext" }),
+  result("uro.imaging.ct", "Scanner", { type: "longtext" }),
+  result("uro.function.flowmetry", "Débitmétrie"),
+  result("uro.function.pvr", "Résidu post-mictionnel", { type: "number", unit: "mL", min: 0, max: 5000 }),
+  result("uro.function.cystoscopy", "Cystoscopie", { type: "longtext" }),
+  result("uro.lab.other", "Autres examens", { type: "longtext" }),
+
   // --- Page 1 : antécédents et histoire ------------------------------------
   { path: "history.medicalSurgical", label: "Antécédents médicaux et chirurgicaux", type: "longtext", section: "history", group: "Antécédents" },
   { path: "history.drugAllergy", label: "Allergie à des médicaments", type: "choice", section: "history", group: "Antécédents", options: [o("non", "Non"), o("oui", "Oui")] },
@@ -233,6 +353,11 @@ export const FIELDS: FieldDef[] = [
 ];
 
 export const FIELD_BY_PATH = new Map(FIELDS.map((f) => [f.path, f]));
+
+/** Champ d'une section du contexte maritime (affiché et proposé à l'IA seulement si ce contexte est activé). */
+export function isMaritimeField(f: FieldDef) {
+  return Boolean(SECTION_BY_KEY.get(f.section)?.maritime) || f.path === "teleconsultation.sentToCcmm" || f.path === "teleconsultation.procedures";
+}
 export const AI_FIELDS = FIELDS.filter((f) => f.ai !== false);
 export const AI_FIELD_PATHS = AI_FIELDS.map((f) => f.path);
 

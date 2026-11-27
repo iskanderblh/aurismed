@@ -5,6 +5,8 @@ import { formDataSchema, type ObservationFormData } from "@/lib/medical/form-sta
 import { LocalAiError } from "@/server/local-ai/errors";
 import { localMedicalAI } from "@/server/local-ai/service";
 import { processExtraction } from "@/server/ai/process";
+import { maritimeEnabled } from "@/lib/medical/context";
+import { loadTaxonomy } from "@/server/urology/taxonomy";
 import { syncConsultationStatus } from "@/lib/data/consultation-status";
 import type { Json } from "@/types/database";
 
@@ -44,9 +46,12 @@ export async function POST(_request: Request, { params }: RouteContext<"/api/con
   let form: ObservationFormData;
   let model: string;
   try {
-    const result = await localMedicalAI.extractObservation(text);
+    const prevForm = previous?.success ? (previous.data as ObservationFormData) : null;
+    const maritime = maritimeEnabled(prevForm);
+    const { taxonomy } = await loadTaxonomy(db);
+    const result = await localMedicalAI.extractObservation(text, { maritime, taxonomy });
     model = result.model;
-    form = processExtraction(result.output, text, previous?.success ? (previous.data as ObservationFormData) : null, { model });
+    form = processExtraction(result.output, text, prevForm, { model, maritime, taxonomy });
     // Trace de la réponse brute validée, distincte des valeurs de la fiche.
     const aiExtraction = { model, at: form.extractedAt, output: result.output } as unknown as Json;
     const values = {

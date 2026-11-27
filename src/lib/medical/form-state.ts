@@ -48,6 +48,33 @@ export type MedicationLine = {
   notes?: string[];
 };
 
+/** Présence d'un symptôme : un symptôme non abordé n'apparaît pas (« Non mentionné »). */
+export type SymptomPresence = "yes" | "no" | "uncertain";
+export const SYMPTOM_ATTRS = ["duration", "onset", "frequency", "severity", "location", "side", "radiation", "aggravating", "relieving", "count", "value", "date", "details"] as const;
+export type SymptomAttrs = Partial<Record<(typeof SYMPTOM_ATTRS)[number], string>>;
+
+export type SymptomConflict = { presence?: SymptomPresence; attrs?: SymptomAttrs; source: string; sourceSeq?: number; sourceAt?: number; speaker?: Speaker };
+
+/** Symptôme urologique documenté (taxonomie src/lib/urology/taxonomy.ts). */
+export type SymptomState = {
+  presence: SymptomPresence;
+  status: FieldStatus;
+  attrs: SymptomAttrs;
+  /** Expression d'origine, telle que dite. */
+  expression?: string;
+  confidence?: Confidence;
+  source?: string;
+  speaker?: Speaker;
+  kind?: InfoKind;
+  sourceSeq?: number;
+  sourceAt?: number;
+  notes?: string[];
+  conflicts?: SymptomConflict[];
+  /** Proposition de l'IA conservée quand le médecin la modifie ou la rejette. */
+  aiPresence?: SymptomPresence;
+  rejected?: boolean;
+};
+
 export type Contradiction = { paths: string[]; description: string; quotes: string[] };
 export type MissingItem = { path: string; reason: string };
 
@@ -96,6 +123,12 @@ export type ObservationFormData = {
   discarded: { path: string; value: string; reason: string }[];
   extractedAt?: string;
   model?: string;
+  /** Symptômes urologiques, par identifiant de la taxonomie. */
+  symptoms?: Record<string, SymptomState>;
+  /** Contexte maritime (sections CCMM) affiché ; désactivé par défaut pour une consultation d'urologie. */
+  maritime?: boolean;
+  /** Alertes de gravité vues par le médecin (identifiant → date). */
+  alertsReviewed?: Record<string, string>;
   /** Analyse au fil de la consultation : dernier morceau de transcription analysé. */
   live?: { lastSeq: number; runs: number; at: string; model?: string; reconciledSeq?: number };
 };
@@ -218,6 +251,37 @@ const fieldStateSchema = z.object({
     .optional(),
 });
 
+const presenceSchema = z.enum(["yes", "no", "uncertain"]);
+const attrsSchema = z.object(Object.fromEntries(SYMPTOM_ATTRS.map((k) => [k, z.string().max(1000).optional()]))).strict();
+const symptomStateSchema = z.object({
+  presence: presenceSchema,
+  status: z.enum(["extracted", "needs_verification", "not_mentioned", "manual", "confirmed"]),
+  attrs: attrsSchema,
+  expression: z.string().max(1000).optional(),
+  confidence: z.enum(["high", "medium", "low"]).optional(),
+  source: z.string().max(4000).optional(),
+  speaker: z.enum(["patient", "doctor", "onboard_caregiver", "unknown"]).optional(),
+  kind: z.enum(["reported", "observed", "measured", "instruction"]).optional(),
+  sourceSeq: z.number().int().min(0).optional(),
+  sourceAt: z.number().int().min(0).optional(),
+  notes: z.array(z.string().max(500)).max(10).optional(),
+  conflicts: z
+    .array(
+      z.object({
+        presence: presenceSchema.optional(),
+        attrs: attrsSchema.optional(),
+        source: z.string().max(4000),
+        sourceSeq: z.number().int().min(0).optional(),
+        sourceAt: z.number().int().min(0).optional(),
+        speaker: z.enum(["patient", "doctor", "onboard_caregiver", "unknown"]).optional(),
+      }),
+    )
+    .max(10)
+    .optional(),
+  aiPresence: presenceSchema.optional(),
+  rejected: z.boolean().optional(),
+});
+
 const medicationSchema = z.object({
   id: z.string().min(1).max(64),
   name: z.string().max(200),
@@ -277,6 +341,9 @@ export const formDataSchema = z
     discarded: z.array(z.object({ path: z.string(), value: z.string().max(2000), reason: z.string().max(500) })).max(200),
     extractedAt: z.string().optional(),
     model: z.string().max(100).optional(),
+    symptoms: z.record(z.string().regex(/^[a-z0-9_]{2,60}$/), symptomStateSchema).optional(),
+    maritime: z.boolean().optional(),
+    alertsReviewed: z.record(z.string().max(60), z.string().max(40)).optional(),
     live: z
       .object({
         lastSeq: z.number().int().min(-1),
@@ -302,5 +369,13 @@ export function pendingReview(data: ObservationFormData) {
     ([, s]) => s.status === "extracted" || s.status === "needs_verification" || (s.conflicts?.length ?? 0) > 0,
   );
   const meds = data.medications.filter((m) => m.status === "proposed");
-  return { fields: fields.map(([p]) => p), medications: meds.map((m) => m.id), total: fields.length + meds.length };
+  const symptoms = Object.entries(data.symptoms ?? {}).filter(
+    ([, s]) => s.status === "extracted" || s.status === "needs_verification" || (s.conflicts?.length ?? 0) > 0,
+  );
+  return {
+    fields: fields.map(([p]) => p),
+    medications: meds.map((m) => m.id),
+    symptoms: symptoms.map(([id]) => id),
+    total: fields.length + meds.length + symptoms.length,
+  };
 }
