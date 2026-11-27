@@ -22,7 +22,17 @@ export type FieldState = {
   /** Valeur proposée par l'IA, conservée quand le médecin la modifie ou la rejette. */
   aiValue?: FieldValue | null;
   rejected?: boolean;
+  /** Morceau de transcription en direct d'où vient la valeur (numéro et position dans l'enregistrement). */
+  sourceSeq?: number;
+  sourceAt?: number;
+  /**
+   * Informations ultérieures qui contredisent la valeur du champ. La valeur
+   * n'est jamais changée automatiquement : le médecin choisit.
+   */
+  conflicts?: FieldConflict[];
 };
+
+export type FieldConflict = { value: FieldValue; source: string; sourceSeq?: number; sourceAt?: number; speaker?: Speaker };
 
 export type MedicationLine = {
   id: string;
@@ -86,6 +96,8 @@ export type ObservationFormData = {
   discarded: { path: string; value: string; reason: string }[];
   extractedAt?: string;
   model?: string;
+  /** Analyse au fil de la consultation : dernier morceau de transcription analysé. */
+  live?: { lastSeq: number; runs: number; at: string; model?: string; reconciledSeq?: number };
 };
 
 export function emptyFormData(): ObservationFormData {
@@ -190,6 +202,20 @@ const fieldStateSchema = z.object({
   notes: z.array(z.string().max(500)).max(10).optional(),
   aiValue: z.union([z.string(), z.number(), z.boolean(), z.array(z.string()), z.null()]).optional(),
   rejected: z.boolean().optional(),
+  sourceSeq: z.number().int().min(0).optional(),
+  sourceAt: z.number().int().min(0).optional(),
+  conflicts: z
+    .array(
+      z.object({
+        value: z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+        source: z.string().max(4000),
+        sourceSeq: z.number().int().min(0).optional(),
+        sourceAt: z.number().int().min(0).optional(),
+        speaker: z.enum(["patient", "doctor", "onboard_caregiver", "unknown"]).optional(),
+      }),
+    )
+    .max(10)
+    .optional(),
 });
 
 const medicationSchema = z.object({
@@ -251,6 +277,15 @@ export const formDataSchema = z
     discarded: z.array(z.object({ path: z.string(), value: z.string().max(2000), reason: z.string().max(500) })).max(200),
     extractedAt: z.string().optional(),
     model: z.string().max(100).optional(),
+    live: z
+      .object({
+        lastSeq: z.number().int().min(-1),
+        runs: z.number().int().min(0),
+        at: z.string().max(40),
+        model: z.string().max(100).optional(),
+        reconciledSeq: z.number().int().min(-1).optional(),
+      })
+      .optional(),
   })
   .superRefine((data, ctx) => {
     for (const [path, state] of Object.entries(data.fields)) {
@@ -262,7 +297,10 @@ export const formDataSchema = z
 
 /** Nombre de champs encore à revoir (proposés par l'IA et pas encore acceptés ni modifiés). */
 export function pendingReview(data: ObservationFormData) {
-  const fields = Object.entries(data.fields).filter(([, s]) => s.status === "extracted" || s.status === "needs_verification");
+  // Champ proposé par l'IA, ou champ contredit par une information ultérieure non encore tranchée.
+  const fields = Object.entries(data.fields).filter(
+    ([, s]) => s.status === "extracted" || s.status === "needs_verification" || (s.conflicts?.length ?? 0) > 0,
+  );
   const meds = data.medications.filter((m) => m.status === "proposed");
   return { fields: fields.map(([p]) => p), medications: meds.map((m) => m.id), total: fields.length + meds.length };
 }

@@ -7,9 +7,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FIELD_BY_PATH, FIELDS, SECTIONS, type FieldDef, type SectionKey } from "@/lib/medical/catalog";
+import { applyProposals, resolveConflict, type ProposalSet } from "@/lib/medical/reconcile";
 import { emptyFormData, isEmptyValue, pendingReview, type FieldState, type FieldValue, type ObservationFormData } from "@/lib/medical/form-state";
 import type { ObservationStageData } from "@/lib/data/recordings";
-import type { TranscriptionInfo } from "@/lib/recording/types";
+import type { LiveSegmentInfo, TranscriptionInfo } from "@/lib/recording/types";
 import type { ObservationValidationStatus } from "@/types/database";
 import { cn } from "@/lib/utils";
 import { FormSection } from "../form-controls";
@@ -47,6 +48,8 @@ export function ObservationReview({
   defaultDoctor,
   onStatusChange,
   onValidationChange,
+  liveSegments = [],
+  recording = false,
 }: {
   consultationId: string | null;
   transcription: TranscriptionInfo | null;
@@ -59,6 +62,9 @@ export function ObservationReview({
   defaultDoctor: string;
   onStatusChange?: () => void;
   onValidationChange?: (v: ObservationValidationStatus | null) => void;
+  /** Transcription en direct : la fiche se remplit au fil des répliques stables. */
+  liveSegments?: LiveSegmentInfo[];
+  recording?: boolean;
 }) {
   const [form, setForm] = useState<ObservationFormData | null>(initial.form);
   const [validation, setValidationState] = useState<ObservationValidationStatus | null>(initial.validationStatus);
@@ -80,7 +86,9 @@ export function ObservationReview({
   const savedVersion = useRef(0);
   const inFlight = useRef<Promise<boolean> | null>(null);
 
-  const transcript = transcription ? transcription.corrected || transcription.original : "";
+  const transcript = transcription
+    ? transcription.corrected || transcription.original
+    : liveSegments.map((s) => s.text.trim()).filter(Boolean).join(" ");
   const confirmed = Boolean(transcription?.confirmedAt);
   const pending = useMemo(() => (form ? pendingReview(form) : { fields: [], medications: [], total: 0 }), [form]);
 
@@ -176,6 +184,103 @@ export function ObservationReview({
     }
   };
 
+  // --- Analyse au fil de la consultation ------------------------------------
+  const [live, setLive] = useState<{ running: "incremental" | "reconcile" | null; error?: string; filled: number; conflicts: number }>({
+    running: null,
+    filled: 0,
+    conflicts: 0,
+  });
+  const liveBusy = useRef(false);
+  const lastLiveRun = useRef(0);
+  const liveFailures = useRef(0);
+  const [liveTick, setLiveTick] = useState(0);
+
+  const forceLive = useRef(false);
+  const runLive = useEffectEvent(async () => {
+    const force = forceLive.current;
+    forceLive.current = false;
+    if (liveBusy.current || analyzing || !consultationId || validation === "validated") return;
+    const current = latest.current ?? emptyFormData();
+    const maxSeq = Math.max(-1, ...liveSegments.map((s) => s.seq));
+    // « Supprimer et recommencer » : les répliques repartent de zéro.
+    if (current.live && maxSeq < 0) {
+      if (!recording && current.live.lastSeq >= 0) apply({ ...current, live: undefined });
+      return;
+    }
+    const lastSeq = current.live?.lastSeq ?? -1;
+    const fresh = liveSegments.filter((s) => s.seq > lastSeq && s.text.trim());
+    let mode: "incremental" | "reconcile" | null = null;
+    if (fresh.length && (force || !recording || fresh.length >= 2 || Date.now() - lastLiveRun.current > 20_000)) mode = "incremental";
+    else if (!fresh.length && maxSeq > lastSeq && !recording) mode = "incremental";
+    else if (!fresh.length && !recording && current.live && current.live.runs > 0 && (current.live.reconciledSeq ?? -1) < maxSeq) mode = "reconcile";
+    if (!mode) return;
+    // Après une erreur, nouvel essai espacé (30 s, 60 s...) sauf demande du médecin.
+    if (!force && liveFailures.current && Date.now() - lastLiveRun.current < 30_000 * liveFailures.current) return;
+
+    liveBusy.current = true;
+    lastLiveRun.current = Date.now();
+    setLive((l) => ({ ...l, running: mode, error: undefined }));
+    try {
+      const res = await fetch(`/api/consultations/${consultationId}/extraction/direct`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ afterSeq: lastSeq, mode }),
+      });
+      const body = (await res.json().catch(() => null)) as
+        | { ok: true; toSeq: number; proposals: ProposalSet | null; model: string | null }
+        | { ok: false; error: string; retryable?: boolean }
+        | null;
+      if (!body || !body.ok) {
+        liveFailures.current += 1;
+        setLive((l) => ({ ...l, running: null, error: body?.error ?? "L'analyse locale a échoué. La fiche n'a pas été modifiée." }));
+        return;
+      }
+      liveFailures.current = 0;
+      const base = latest.current ?? emptyFormData();
+      let next = base;
+      let filled = 0;
+      let conflicts = 0;
+      if (body.proposals) {
+        const merged = applyProposals(base, body.proposals, { idPrefix: "live" });
+        next = merged.form;
+        filled = merged.report.filled.length + merged.report.medications;
+        conflicts = merged.report.conflicts.length;
+      }
+      const prevLive = base.live;
+      next = {
+        ...next,
+        live: {
+          lastSeq: mode === "incremental" ? Math.max(prevLive?.lastSeq ?? -1, body.toSeq) : (prevLive?.lastSeq ?? body.toSeq),
+          runs: (prevLive?.runs ?? 0) + (body.proposals ? 1 : 0),
+          at: new Date().toISOString(),
+          ...(body.model ? { model: body.model } : prevLive?.model ? { model: prevLive.model } : {}),
+          ...(mode === "reconcile" ? { reconciledSeq: body.toSeq } : prevLive?.reconciledSeq !== undefined ? { reconciledSeq: prevLive.reconciledSeq } : {}),
+        },
+      };
+      apply(next);
+      setLive((l) => ({ running: null, filled: l.filled + filled, conflicts: l.conflicts + conflicts }));
+      if (filled) onProgress?.(4);
+    } catch {
+      liveFailures.current += 1;
+      setLive((l) => ({ ...l, running: null, error: "Connexion au serveur local impossible." }));
+    } finally {
+      liveBusy.current = false;
+      setLiveTick((t) => t + 1);
+    }
+  });
+
+  // Nouvelles répliques, fin d'enregistrement ou fin d'une analyse : on regarde s'il reste à analyser.
+  useEffect(() => {
+    const t = setTimeout(() => void runLive(), 1000);
+    return () => clearTimeout(t);
+  }, [liveSegments, recording, liveTick]);
+  // Pendant l'enregistrement, une réplique isolée est analysée au plus tard après 20 s.
+  useEffect(() => {
+    if (!recording) return;
+    const t = setInterval(() => void runLive(), 5000);
+    return () => clearInterval(t);
+  }, [recording]);
+
   const validate = async () => {
     if (!consultationId || !latest.current) return;
     setValidating(true);
@@ -212,11 +317,13 @@ export function ObservationReview({
     const prev = base.fields[path];
     const fromAi = prev && (prev.status === "extracted" || prev.status === "needs_verification");
     const aiValue = prev?.aiValue !== undefined ? prev.aiValue : fromAi ? prev.value : undefined;
-    if (isEmptyValue(value) && aiValue === undefined) return setField(path, undefined);
+    if (isEmptyValue(value) && aiValue === undefined && !prev?.conflicts?.length) return setField(path, undefined);
     setField(path, {
       value: isEmptyValue(value) ? null : value,
       status: "manual",
       ...(aiValue !== undefined && { aiValue, source: prev?.source, confidence: prev?.confidence }),
+      // Une contradiction non tranchée reste affichée.
+      ...(prev?.conflicts?.length && { conflicts: prev.conflicts }),
     });
   };
   const accept = (path: string) => {
@@ -230,6 +337,10 @@ export function ObservationReview({
   const restore = (path: string) => {
     const prev = base.fields[path];
     if (prev?.aiValue !== undefined) setField(path, { ...prev, value: prev.aiValue, status: "needs_verification", rejected: undefined });
+  };
+  const resolve = (path: string, index: number, keep: "new" | "current") => {
+    const prev = base.fields[path];
+    if (prev) setField(path, resolveConflict(prev, index, keep));
   };
   const highConfidence = Object.entries(base.fields).filter(([, s]) => s.status === "extracted" && s.confidence === "high" && !s.notes?.length);
   const acceptAllHigh = () => {
@@ -338,6 +449,40 @@ export function ObservationReview({
         )}
       </div>
 
+      {(recording || liveSegments.length > 0 || form?.live) && validation !== "validated" && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm" data-testid="live-analysis" aria-live="polite">
+          {live.running ? <Loader2 className="size-4 animate-spin text-primary" /> : <Sparkles className="size-4 text-primary" />}
+          <span className="font-medium">Analyse médicale locale</span>
+          <span className="text-muted-foreground">
+            {live.running === "reconcile"
+              ? "relecture de toute la consultation…"
+              : live.running
+                ? "analyse des dernières phrases…"
+                : form?.live
+                  ? `à jour${form.live.model ? ` (${form.live.model})` : ""} : ${live.filled} information(s) extraite(s), ${live.conflicts} contradiction(s) signalée(s) pendant cette session`
+                  : recording
+                    ? "la fiche se remplira au fil des phrases transcrites"
+                    : "en attente"}
+          </span>
+          {live.error && (
+            <span className="flex flex-wrap items-center gap-2 text-destructive">
+              <AlertCircle className="size-4" /> {live.error}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  liveFailures.current = 0;
+                  forceLive.current = true;
+                  setLiveTick((t) => t + 1);
+                }}
+              >
+                <RotateCw /> Réessayer
+              </Button>
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Synthèse */}
       <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="review-summary">
         {validation && <Badge variant={validation === "validated" ? "success" : "outline"}>{VALIDATION_LABEL[validation]}</Badge>}
@@ -444,6 +589,7 @@ export function ObservationReview({
             onAccept={accept}
             onReject={reject}
             onRestore={restore}
+            onResolve={resolve}
             showEmptyHint={view !== "all"}
             extra={
               section.key === "trauma" ? (
@@ -477,6 +623,7 @@ export function ObservationReview({
             onAccept={accept}
             onReject={reject}
             onRestore={restore}
+            onResolve={resolve}
             showEmptyHint={false}
             forceOpen
           />
@@ -565,6 +712,7 @@ function ReviewSection({
   onAccept,
   onReject,
   onRestore,
+  onResolve,
   showEmptyHint,
   extra,
   forceOpen,
@@ -581,11 +729,14 @@ function ReviewSection({
   onAccept: (path: string) => void;
   onReject: (path: string) => void;
   onRestore: (path: string) => void;
+  onResolve: (path: string, index: number, keep: "new" | "current") => void;
   showEmptyHint: boolean;
 }) {
   const fields = FIELDS.filter((f) => f.section === sectionKey);
   const shown = fields.filter(visible);
-  const pendingCount = fields.filter((f) => ["extracted", "needs_verification"].includes(form.fields[f.path]?.status ?? "")).length;
+  const pendingCount = fields.filter(
+    (f) => ["extracted", "needs_verification"].includes(form.fields[f.path]?.status ?? "") || (form.fields[f.path]?.conflicts?.length ?? 0) > 0,
+  ).length;
   const groups = [...new Set(shown.map((f) => f.group))];
 
   return (
@@ -593,6 +744,7 @@ function ReviewSection({
       title={title}
       description={description}
       defaultOpen={forceOpen || pendingCount > 0 || shown.length > 0 || Boolean(extra && form.bodyMarks.length)}
+      openWhenGrows={pendingCount}
       badge={pendingCount ? <Badge variant="warning">{pendingCount} à vérifier</Badge> : undefined}
     >
       {shown.length === 0 && extra ? null : shown.length === 0 ? (
@@ -617,6 +769,7 @@ function ReviewSection({
                         onAccept={() => onAccept(f.path)}
                         onReject={() => onReject(f.path)}
                         onRestore={() => onRestore(f.path)}
+                        onResolveConflict={(i, keep) => onResolve(f.path, i, keep)}
                       />
                     </div>
                   ))}

@@ -26,7 +26,7 @@ import {
   type PatientInformation,
   type VesselInformation,
 } from "@/lib/consultation/schema";
-import type { RecordingStageData, TranscriptionInfo } from "@/lib/recording/types";
+import type { LiveSegmentInfo, RecordingStageData, TranscriptionInfo } from "@/lib/recording/types";
 import type { ObservationStageData } from "@/lib/data/recordings";
 import { CheckboxField, ChoiceField, FormSection, TextField } from "./form-controls";
 import { RecordingStage } from "./recording/recording-stage";
@@ -96,6 +96,7 @@ export function ConsultationWorkspace({
   const [allergy, setAllergy] = useState(() => allergyText(observationData.form));
   const [rxLines, setRxLines] = useState<PrescriptionLine[]>(prescriptionData.data?.lines ?? []);
   const [transcription, setTranscription] = useState<TranscriptionInfo | null>(recordingData.transcription);
+  const [live, setLive] = useState<{ segments: LiveSegmentInfo[]; recording: boolean }>({ segments: recordingData.liveSegments, recording: false });
   const [step, setStep] = useState(() => {
     if (prescriptionData.validationStatus === "validated") return 6;
     if (observationData.validationStatus === "validated") return 5;
@@ -344,6 +345,7 @@ export function ConsultationWorkspace({
           data={recordingData}
           onProgress={(n) => setStep((s) => Math.max(s, n))}
           onTranscriptionChange={setTranscription}
+          onLiveChange={setLive}
         />
       </FormSection>
 
@@ -366,6 +368,8 @@ export function ConsultationWorkspace({
           prescriptionLines={rxLines}
           defaultDoctor={prescriptionData.prescriber.fullName}
           onStatusChange={() => router.refresh()}
+          liveSegments={live.segments}
+          recording={live.recording}
           onValidationChange={(v) => setObsState({ validated: v === "validated", validatedAt: v === "validated" ? new Date().toISOString() : null })}
         />
       </FormSection>

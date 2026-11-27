@@ -1,5 +1,5 @@
 import "server-only";
-import { extractWithLocalModel } from "@/server/ai/local-extraction";
+import { extractFromSegments, extractWithLocalModel } from "@/server/ai/local-extraction";
 import { SCENARIOS } from "@/server/ai/scenarios";
 import { processExtraction } from "@/server/ai/process";
 import type { TranscriptionInput } from "@/server/transcription/provider";
@@ -60,6 +60,11 @@ export class LocalMedicalAIService {
 
   async extractObservation(transcript: string) {
     return extractWithLocalModel(transcript);
+  }
+
+  /** Analyse au fil de la consultation (nouvelles répliques, ou relecture d'ensemble). */
+  async extractFromSegments(input: Parameters<typeof extractFromSegments>[0]) {
+    return extractFromSegments(input);
   }
 
   async status(): Promise<EngineStatus> {

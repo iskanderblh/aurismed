@@ -42,3 +42,39 @@ Règles absolues :
 export function userPrompt(transcript: string) {
   return `Catalogue des champs de la fiche d'observation :\n\n${fieldCatalogForPrompt()}\n\nTranscription de la consultation :\n"""\n${transcript}\n"""`;
 }
+
+/** Réplique de la transcription en direct telle que transmise au modèle. */
+export type PromptSegment = { seq: number; startMs: number; text: string; speaker: "doctor" | "patient" | "unknown" };
+
+const SPEAKER_FR = { doctor: "Médecin", patient: "Patient", unknown: "Locuteur non identifié" } as const;
+const clock = (ms: number) => {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+export const formatPromptSegment = (s: PromptSegment) => `[${s.seq}] (${SPEAKER_FR[s.speaker]}, ${clock(s.startMs)}) ${s.text.trim()}`;
+
+export const INCREMENTAL_RULES = `
+
+Analyse au fil de la consultation :
+14. Tu reçois des répliques numérotées [n] de la transcription en direct. Pour chaque information, indique dans "segment" le numéro de la réplique d'où vient la citation (source_quote doit être copiée de cette réplique).
+15. L'interlocuteur indiqué entre parenthèses a pu être vérifié par le médecin : utilise-le pour "speaker" quand il est connu. « Locuteur non identifié » : déduis-le seulement si c'est évident, sinon "unknown".
+16. Les valeurs déjà présentes dans la fiche te sont données. Ne les répète pas. Si une nouvelle réplique les contredit, donne la nouvelle valeur dans "fields" (elle sera présentée au médecin comme contradiction, jamais remplacée automatiquement) et décris l'écart dans "contradictions".
+17. Les répliques de contexte (déjà analysées) servent seulement à comprendre la suite : n'en extrais rien.`;
+
+export function incrementalUserPrompt(input: {
+  segments: PromptSegment[];
+  context: PromptSegment[];
+  current: { path: string; label: string; value: string }[];
+  full: boolean;
+}) {
+  const parts = [`Catalogue des champs de la fiche d'observation :\n\n${fieldCatalogForPrompt()}`];
+  if (input.current.length) {
+    parts.push(`Valeurs déjà présentes dans la fiche :\n${input.current.map((c) => `- ${c.path} (${c.label}) = ${c.value}`).join("\n")}`);
+  }
+  if (input.context.length) parts.push(`Répliques de contexte (déjà analysées) :\n${input.context.map(formatPromptSegment).join("\n")}`);
+  parts.push(
+    `${input.full ? "Transcription complète de la consultation (relecture d'ensemble)" : "Nouvelles répliques à analyser"} :\n"""\n${input.segments.map(formatPromptSegment).join("\n")}\n"""`,
+  );
+  if (!input.full) parts.push(`Pour "missing_important", renvoie une liste vide.`);
+  return parts.join("\n\n");
+}

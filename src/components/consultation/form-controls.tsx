@@ -123,8 +123,11 @@ export function FormSection({
   icon,
   defaultOpen = true,
   badge,
+  openWhenGrows,
   children,
 }: {
+  /** La section s'ouvre quand ce nombre augmente (nouvelles propositions de l'IA pendant la consultation). */
+  openWhenGrows?: number;
   title: string;
   description?: string;
   icon?: ReactNode;
@@ -133,6 +136,11 @@ export function FormSection({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const [seen, setSeen] = useState(openWhenGrows ?? 0);
+  if (openWhenGrows !== undefined && openWhenGrows !== seen) {
+    setSeen(openWhenGrows);
+    if (openWhenGrows > seen) setOpen(true);
+  }
   const id = useId();
   return (
     <section className="rounded-xl border bg-card shadow-sm">

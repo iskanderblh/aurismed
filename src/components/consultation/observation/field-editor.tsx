@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Quote, Undo2, X } from "lucide-react";
+import { AlertTriangle, Check, Quote, Undo2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,11 +12,11 @@ import { quoteContext } from "@/lib/medical/quotes";
 import { cn } from "@/lib/utils";
 
 export const STATUS_META: Record<FieldState["status"], { label: string; variant: "success" | "warning" | "secondary" | "outline" | "default" }> = {
-  extracted: { label: "Extrait par l'IA", variant: "default" },
+  extracted: { label: "Information extraite", variant: "default" },
   needs_verification: { label: "À vérifier", variant: "warning" },
-  not_mentioned: { label: "Non mentionné", variant: "outline" },
-  manual: { label: "Saisi par le médecin", variant: "secondary" },
-  confirmed: { label: "Confirmé", variant: "success" },
+  not_mentioned: { label: "Information manquante", variant: "outline" },
+  manual: { label: "Modifié par le médecin", variant: "secondary" },
+  confirmed: { label: "Validé par le médecin", variant: "success" },
 };
 
 const CONFIDENCE = { high: "élevée", medium: "moyenne", low: "faible" } as const;
@@ -30,6 +30,12 @@ export function formatValue(field: FieldDef, value: FieldValue | null | undefine
   if (field.type === "choice") return optionLabel(field, String(value));
   if (field.type === "datetime") return formatLocalDateTime(String(value));
   return `${value}${field.unit ? ` ${field.unit}` : ""}`;
+}
+
+/** Position dans l'enregistrement (ms) → « 1:05 ». */
+export function clock(ms: number) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 /** « 2026-11-25T14:30 » → « 25/11/2026 14:30 » (heure locale saisie, sans conversion). */
@@ -47,6 +53,7 @@ export function FieldEditor({
   onAccept,
   onReject,
   onRestore,
+  onResolveConflict,
 }: {
   field: FieldDef;
   state: FieldState | undefined;
@@ -55,6 +62,7 @@ export function FieldEditor({
   onAccept: () => void;
   onReject: () => void;
   onRestore: () => void;
+  onResolveConflict?: (index: number, keep: "new" | "current") => void;
 }) {
   const [showSource, setShowSource] = useState(false);
   const status = state?.status ?? "not_mentioned";
@@ -69,9 +77,11 @@ export function FieldEditor({
     <div
       data-field={field.path}
       data-status={status}
+      data-conflicts={state?.conflicts?.length ?? 0}
       className={cn(
         "rounded-lg border p-3",
         lowConfidence && "border-amber-300 bg-amber-50/60",
+        Boolean(state?.conflicts?.length) && "border-red-300 bg-red-50/50",
         status === "extracted" && !lowConfidence && "border-primary/30 bg-primary/[0.03]",
       )}
     >
@@ -98,6 +108,7 @@ export function FieldEditor({
             <li>
               Information {state.kind ? KIND[state.kind] : ""}
               {state.speaker ? ` · ${SPEAKER[state.speaker]}` : ""}
+              {state.sourceAt !== undefined ? ` · à ${clock(state.sourceAt)} de l'enregistrement` : ""}
             </li>
           )}
           {state.notes?.map((n) => (
@@ -107,6 +118,29 @@ export function FieldEditor({
           ))}
         </ul>
       ) : null}
+
+      {state?.conflicts?.map((c, i) => (
+        <div key={i} className="mt-2 rounded-md border border-red-200 bg-white p-2 text-sm" data-conflict>
+          <p className="flex items-start gap-1.5 font-medium text-destructive">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            Information contradictoire : {formatValue(field, c.value)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            « {c.source} »{c.speaker ? ` · ${SPEAKER[c.speaker]}` : ""}
+            {c.sourceAt !== undefined ? ` · à ${clock(c.sourceAt)}` : ""}. La valeur du champ n&apos;a pas été changée.
+          </p>
+          {onResolveConflict && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => onResolveConflict(i, "new")}>
+                Utiliser cette valeur
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => onResolveConflict(i, "current")}>
+                Garder {isEmptyValue(state.value) ? "le champ vide" : `« ${formatValue(field, state.value)} »`}
+              </Button>
+            </div>
+          )}
+        </div>
+      ))}
 
       {touchedAi && (
         <p className="mt-2 text-xs text-muted-foreground">
