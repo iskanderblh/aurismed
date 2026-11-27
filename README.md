@@ -23,7 +23,7 @@ Passage au tout-local et spécialisation urologie :
 | Phase | Contenu | État |
 | --- | --- | --- |
 | 1 | Architecture locale : base SQLite, comptes locaux, fichiers chiffrés, `LocalMedicalAIService` (whisper.cpp, Ollama), lanceur des moteurs, page « Moteur IA local », scripts Windows | ✅ |
-| 2 | Transcription progressive (VAD, segments chevauchants, texte stable et provisoire, locuteurs) | à venir |
+| 2 | Transcription progressive (VAD, segments chevauchants, texte stable et provisoire, locuteurs) | fait |
 | 3 | Extraction incrémentale, réconciliation, statuts de champ, lien valeur / segment | à venir |
 | 4 | Spécialisation urologie (taxonomie des symptômes, fiche, alertes, espace à trois panneaux) | à venir |
 | 5 | Documents urologie, sauvegardes, conservation et effacement | à venir |
@@ -100,15 +100,33 @@ le journal d'audit est en ajout seul (déclencheurs SQLite).
 1. **Consentement** : avant le premier enregistrement, le médecin confirme l'accord du patient et
    prend connaissance de l'analyse de l'audio et du texte par l'IA locale du poste. Les deux
    horodatages sont stockés sur la consultation.
-2. **Enregistrement** (MediaRecorder) : pause, reprise, arrêt, durée, niveau audio, état du micro.
-   Toutes les 10 minutes, le segment en cours est clos, converti en WAV 16 kHz mono, chiffré et
-   écrit sur le disque, puis un nouveau segment démarre. Un segment dont l'envoi échoue reste dans
-   la page avec un bouton Réessayer. Import de fichiers audio possible (200 Mo maximum, découpés
-   en segments de 10 minutes).
-3. **Transcription** : chaque segment est envoyé séparément (langue `fr`, vocabulaire médical en
-   indication, fin du segment précédent pour la continuité), puis les textes sont assemblés et
-   mis en paragraphes sans modifier les mots. Une erreur s'affiche sur le segment concerné et la
-   transcription reprend là où elle s'est arrêtée.
+2. **Enregistrement avec transcription en direct** : le micro est capté en PCM (AudioWorklet),
+   ramené à 16 kHz mono. Pause, reprise, arrêt, durée, niveau audio, état du micro.
+   - **Stockage** : toutes les 10 minutes, l'audio accumulé est écrit en WAV, chiffré et stocké ;
+     un segment dont l'envoi échoue reste dans la page avec un bouton Réessayer.
+   - **Découpage de la parole** (`src/lib/recording/vad.ts`) : détection d'activité vocale par
+     énergie avec plancher de bruit adaptatif, trames de 30 ms. Un morceau s'ouvre à la parole
+     (avec 0,4 s d'avance) et se ferme après 0,7 s de silence ; au-delà de 20 s il est coupé et le
+     suivant reprend la dernière seconde (chevauchement, mots en double retirés). Les bruits
+     brefs (< 0,3 s de parole) sont ignorés.
+   - **Texte provisoire et texte stable** : pendant une phrase, une version provisoire est
+     transcrite toutes les 2,5 s (affichée en italique gris, jamais enregistrée) ; à la fin de
+     la phrase, la version stable est transcrite et enregistrée (table `transcription_segments`).
+     Un seul envoi à la fois, les versions stables en priorité. Si le moteur s'arrête, la file
+     s'interrompt avec un bouton Réessayer ; l'audio continue d'être enregistré.
+   - **Interlocuteur** : chaque morceau est « Médecin », « Patient » ou « Non identifié »
+     (par défaut). Le médecin le corrige d'un clic ; le bouton « Proposer Médecin / Patient (IA
+     locale) » demande au modèle Ollama une attribution (marquée « IA »), qui ne touche ni au
+     texte ni aux choix du médecin.
+   - **Fin** : à l'arrêt, dès que tous les morceaux et segments sont stockés, la transcription
+     est assemblée (« Médecin : … », « Patient : … ») et les segments audio reçoivent leur texte.
+     Une transcription déjà corrigée ou confirmée par le médecin n'est jamais écrasée.
+   - Import de fichiers audio possible (200 Mo maximum, découpés en segments de 10 minutes).
+3. **Transcription depuis l'audio enregistré** (import, ou repli si la transcription en direct
+   n'a pas pu se faire) : chaque segment est envoyé séparément (langue `fr`, vocabulaire médical
+   en indication, fin du segment précédent pour la continuité), puis les textes sont assemblés
+   et mis en paragraphes sans modifier les mots. Une erreur s'affiche sur le segment concerné et
+   la transcription reprend là où elle s'est arrêtée.
 4. **Correction et confirmation** : la correction est enregistrée automatiquement. La
    confirmation démarre le délai de conservation de l'audio (Paramètres, 30 jours par défaut,
    0 = suppression immédiate). Les fichiers expirés sont supprimés à l'ouverture du tableau de

@@ -147,7 +147,8 @@ export async function deleteAllRecordings(consultationId: string): Promise<{ ok:
   }
   const del = await ctx.db.from("recordings").delete().eq("consultation_id", consultationId);
   const delT = await ctx.db.from("transcriptions").delete().eq("consultation_id", consultationId);
-  if (del.error || delT.error) return { ok: false, error: "Les fichiers ont été supprimés mais pas leurs références. Réessayez." };
+  const delS = await ctx.db.from("transcription_segments").delete().eq("consultation_id", consultationId);
+  if (del.error || delT.error || delS.error) return { ok: false, error: "Les fichiers ont été supprimés mais pas leurs références. Réessayez." };
   await ctx.db.from("audit_logs").insert({
     user_id: ctx.user.id,
     consultation_id: consultationId,

@@ -177,4 +177,27 @@ create table app_settings (
 );
 `,
   },
+  {
+    id: "0003_transcription_segments",
+    sql: `
+-- Transcription en direct : un morceau de parole transcrit pendant la
+-- consultation, avec son interlocuteur (proposé par l'IA locale ou corrigé par
+-- le médecin). Les morceaux sont assemblés en transcription à la fin.
+create table transcription_segments (
+  id text primary key,
+  consultation_id text not null references consultations (id) on delete cascade,
+  user_id text not null references profiles (id) on delete cascade,
+  seq integer not null check (seq >= 0),
+  start_ms integer not null check (start_ms >= 0),
+  end_ms integer not null check (end_ms >= start_ms),
+  text text not null default '',
+  speaker text not null default 'unknown' check (speaker in ('doctor', 'patient', 'unknown')),
+  speaker_source text not null default 'default' check (speaker_source in ('default', 'ai', 'doctor')),
+  model text,
+  created_at text not null,
+  updated_at text not null,
+  unique (consultation_id, seq)
+);
+`,
+  },
 ];

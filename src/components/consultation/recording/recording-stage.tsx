@@ -17,6 +17,7 @@ import {
   Wand2,
 } from "lucide-react";
 import { deleteAllRecordings, getPlaybackUrl, registerRecording } from "@/app/(app)/consultations/recording-actions";
+import { finishLiveTranscription, setSegmentSpeaker, suggestSpeakers } from "@/app/(app)/consultations/live-actions";
 import { Badge } from "@/components/ui/badge";
 import { WAV_MIME, toWavSegments } from "@/lib/recording/wav";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,7 @@ import {
   extensionFor,
   formatDuration,
   type ConsentInfo,
+  type LiveSegmentInfo,
   type RecordingInfo,
   type RecordingStageData,
   type TranscriptionInfo,
@@ -36,7 +38,9 @@ import { TRANSCRIPTION_STATUS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { ConsentPanel } from "./consent-panel";
 import { TranscriptionEditor } from "./transcription-editor";
-import { useSegmentRecorder, type FinishedSegment } from "./use-segment-recorder";
+import { LiveTranscriptPanel, useLiveTranscript } from "./live-transcript";
+import { useLiveRecorder } from "./use-live-recorder";
+import type { Speaker } from "@/types/database";
 import { Waveform } from "./waveform";
 
 /** Envoi du segment au serveur local, qui le chiffre avant de l'écrire sur le disque. */
@@ -62,6 +66,8 @@ type LocalSegment = {
   originalFilename: string | null;
   status: "uploading" | "error";
   error?: string;
+  /** Segment enregistré pendant une session de transcription en direct. */
+  live?: boolean;
 };
 
 async function postJson<T>(url: string): Promise<T | { ok: false; error: string; retryable?: boolean }> {
@@ -122,6 +128,14 @@ export function RecordingStage({
   const localUrls = useRef(new Map<string, string>());
   const nextIndex = useRef(Math.max(-1, ...data.recordings.map((r) => r.segmentIndex)) + 1);
   const fileInput = useRef<HTMLInputElement>(null);
+  /** Segments audio non encore référencés (envoi en cours ou en échec). */
+  const unsent = useRef(0);
+  /** Segments audio de la session en direct en cours, à compléter par leur texte à la fin. */
+  const sessionRecordings = useRef<string[]>([]);
+  const awaitingFinish = useRef(false);
+  const [finishing, setFinishing] = useState(false);
+  const [liveNotice, setLiveNotice] = useState<string>();
+  const [suggesting, setSuggesting] = useState(false);
   const idRef = useRef(consultationId);
   useEffect(() => {
     idRef.current = consultationId;
@@ -148,6 +162,9 @@ export function RecordingStage({
         localUrls.current.set(result.recording.id, URL.createObjectURL(seg.blob));
         setRecordings((r) => [...r, result.recording].sort((a, b) => a.segmentIndex - b.segmentIndex));
         setLocal((l) => l.filter((s) => s.key !== seg.key));
+        if (seg.live) sessionRecordings.current.push(result.recording.id);
+        unsent.current--;
+        void tryFinish();
         return;
       }
       error = result.error;
@@ -158,6 +175,7 @@ export function RecordingStage({
   const enqueue = (segment: Omit<LocalSegment, "key" | "segmentIndex" | "status">) => {
     const seg: LocalSegment = { ...segment, key: crypto.randomUUID(), segmentIndex: nextIndex.current++, status: "uploading" };
     setLocal((l) => [...l, seg]);
+    unsent.current++;
     void upload(seg);
   };
 
@@ -186,12 +204,87 @@ export function RecordingStage({
     );
   };
 
-  const recorder = useSegmentRecorder((s: FinishedSegment) =>
-    void enqueueAudio({ blob: s.blob, mimeType: s.mimeType, duration: s.duration, source: "microphone", originalFilename: null }),
-  );
+  const live = useLiveTranscript(data.liveSegments, () => void tryFinish());
+
+  // Segments déjà en WAV 16 kHz : envoyés tels quels, sans conversion.
+  const recorder = useLiveRecorder({
+    onSegment: (s) => enqueue({ blob: s.blob, mimeType: s.mimeType, duration: s.duration, source: "microphone", originalFilename: null, live: true }),
+    onChunk: (c) => idRef.current && live.push(idRef.current, c),
+  });
+
+  /**
+   * Après l'arrêt : dès que tous les morceaux sont transcrits et tous les
+   * segments audio stockés, la transcription est assemblée.
+   */
+  async function tryFinish() {
+    const id = idRef.current;
+    if (!id || !awaitingFinish.current || !live.isIdle() || unsent.current > 0) return;
+    awaitingFinish.current = false;
+    setFinishing(true);
+    const ids = sessionRecordings.current;
+    sessionRecordings.current = [];
+    const result = await finishLiveTranscription(id, ids).catch(() => ({ ok: false as const, error: "Connexion au serveur impossible." }));
+    setFinishing(false);
+    if (!result.ok) return setStageError(result.error);
+    setRecordings(result.recordings);
+    if (result.transcription) {
+      setTranscription(result.transcription);
+      onProgress?.(2);
+    }
+    setLiveNotice(
+      result.transcriptKept
+        ? "Votre transcription corrigée n'a pas été modifiée : le texte de la nouvelle partie est visible ci-dessus, ajoutez-le si besoin."
+        : undefined,
+    );
+  }
+
+  const startRecording = () => {
+    setLiveNotice(undefined);
+    const offsetMs = Math.round(
+      (recordings.reduce((s, r) => s + (r.duration ?? 0), 0) + local.reduce((s, r) => s + (r.duration ?? 0), 0)) * 1000,
+    );
+    void recorder.start({ firstSeq: live.nextSeq(), offsetMs });
+  };
+
+  const stopRecording = () => {
+    awaitingFinish.current = true;
+    recorder.stop();
+    void tryFinish();
+  };
+
+  const changeSpeaker = async (segment: LiveSegmentInfo, speaker: Speaker) => {
+    const id = idRef.current;
+    if (!id) return;
+    live.setSegments((all) => all.map((s) => (s.id === segment.id ? { ...s, speaker, speakerSource: "doctor" } : s)));
+    const result = await setSegmentSpeaker(id, segment.id, speaker).catch(() => ({ ok: false as const, error: "Connexion au serveur impossible." }));
+    if (!result.ok) {
+      live.setSegments((all) => all.map((s) => (s.id === segment.id ? segment : s)));
+      return setStageError(result.error);
+    }
+    live.setSegments(result.segments);
+    if (result.transcription) setTranscription(result.transcription);
+    setLiveNotice(result.transcriptKept && !confirmed ? "Votre transcription corrigée n'a pas été modifiée : reportez ce changement dans le texte si besoin." : undefined);
+  };
+
+  const suggest = async () => {
+    const id = idRef.current;
+    if (!id) return;
+    setSuggesting(true);
+    const result = await suggestSpeakers(id).catch(() => ({ ok: false as const, error: "Connexion au serveur impossible." }));
+    setSuggesting(false);
+    if (!result.ok) return setStageError(result.error);
+    live.setSegments(result.segments);
+    if (result.transcription) setTranscription(result.transcription);
+    setLiveNotice(
+      result.transcriptKept && !confirmed
+        ? "Propositions appliquées aux morceaux. Votre transcription corrigée n'a pas été modifiée."
+        : `${result.changed ?? 0} interlocuteur(s) proposé(s) par l'IA locale : vérifiez-les.`,
+    );
+  };
 
   // Ne jamais quitter la page avec un enregistrement en cours ou un envoi non terminé.
-  const busy = recorder.state === "recording" || recorder.state === "paused" || local.length > 0 || transcribing !== null;
+  const busy =
+    recorder.state === "recording" || recorder.state === "paused" || local.length > 0 || transcribing !== null || live.pending > 0 || finishing;
   useEffect(() => {
     if (!busy) return;
     const handler = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -274,6 +367,10 @@ export function RecordingStage({
       setPlaying(null);
       setTranscribeError(undefined);
       nextIndex.current = 0;
+      live.clear();
+      sessionRecordings.current = [];
+      awaitingFinish.current = false;
+      setLiveNotice(undefined);
       recorder.reset();
     });
 
@@ -281,7 +378,8 @@ export function RecordingStage({
   const isLive = recorder.state === "recording" || recorder.state === "paused";
   const confirmed = Boolean(transcription?.confirmedAt);
   const totalDuration = recordings.reduce((s, r) => s + (r.duration ?? 0), 0) + local.reduce((s, r) => s + (r.duration ?? 0), 0);
-  const canTranscribe = recordings.length > 0 && local.length === 0 && !isLive && !transcribing && !confirmed;
+  const liveWorking = finishing || (live.pending > 0 && !live.error);
+  const canTranscribe = recordings.length > 0 && local.length === 0 && !isLive && !transcribing && !confirmed && !liveWorking;
   const needsTranscription = recordings.some((r) => r.status !== "completed") || !transcription;
 
   if (!consentGiven) {
@@ -339,7 +437,7 @@ export function RecordingStage({
                 <Button
                   size="lg"
                   className="h-14 rounded-full px-8"
-                  onClick={() => void recorder.start()}
+                  onClick={startRecording}
                   disabled={recorder.state === "requesting" || transcribing !== null}
                 >
                   {recorder.state === "requesting" ? <Loader2 className="animate-spin" /> : <Mic />}
@@ -356,7 +454,7 @@ export function RecordingStage({
                       <Play /> Reprendre
                     </Button>
                   )}
-                  <Button size="lg" variant="destructive" className="h-14 rounded-full px-6" onClick={recorder.stop}>
+                  <Button size="lg" variant="destructive" className="h-14 rounded-full px-6" onClick={stopRecording}>
                     <Square /> Arrêter
                   </Button>
                 </>
@@ -381,11 +479,31 @@ export function RecordingStage({
             {recorder.error && <p className="max-w-lg text-sm text-destructive">{recorder.error}</p>}
             {stageError && <p className="max-w-lg text-sm text-destructive">{stageError}</p>}
             <p className="max-w-lg text-xs text-muted-foreground">
-              Les longues consultations sont découpées automatiquement en segments de{" "}
-              {SEGMENT_SECONDS >= 60 ? `${Math.round(SEGMENT_SECONDS / 60)} minutes` : `${SEGMENT_SECONDS} secondes`}, envoyés au fil de l&apos;eau.
+              Le texte s&apos;affiche au fil de la consultation, transcrit sur ce poste. L&apos;audio est enregistré en segments de{" "}
+              {SEGMENT_SECONDS >= 60 ? `${Math.round(SEGMENT_SECONDS / 60)} minutes` : `${SEGMENT_SECONDS} secondes`}, chiffrés au fil de l&apos;eau.
             </p>
           </div>
         </div>
+      )}
+
+      <LiveTranscriptPanel
+        segments={live.segments}
+        partial={live.partial}
+        pending={live.pending}
+        error={live.error}
+        live={isLive}
+        speaking={recorder.speaking}
+        readOnly={confirmed}
+        suggesting={suggesting}
+        notice={liveNotice}
+        onRetry={live.retry}
+        onSpeaker={(seg, sp) => void changeSpeaker(seg, sp)}
+        onSuggest={() => void suggest()}
+      />
+      {finishing && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Assemblage de la transcription…
+        </p>
       )}
 
       {(recordings.length > 0 || local.length > 0) && (
@@ -464,7 +582,7 @@ export function RecordingStage({
         </div>
       )}
 
-      {recordings.length > 0 && !confirmed && needsTranscription && (
+      {recordings.length > 0 && !confirmed && needsTranscription && !isLive && !liveWorking && (
         <div className="flex flex-col items-center gap-3 rounded-xl border p-5 text-center">
           <Button size="lg" onClick={() => void transcribe()} disabled={!canTranscribe}>
             {transcribing ? <Loader2 className="animate-spin" /> : <Wand2 />}
@@ -472,7 +590,9 @@ export function RecordingStage({
               ? `Transcription… ${Math.min(transcribing.done + 1, transcribing.total)}/${transcribing.total}`
               : transcribeError
                 ? "Reprendre la transcription"
-                : "Transcrire la consultation"}
+                : live.segments.length
+                  ? "Transcrire depuis l'audio enregistré"
+                  : "Transcrire la consultation"}
           </Button>
           <p className="text-xs text-muted-foreground">
             Transcription en français par {data.providerLabel}, sans envoi en ligne. L&apos;audio original est conservé jusqu&apos;à la
