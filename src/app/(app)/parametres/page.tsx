@@ -10,15 +10,18 @@ import { getSettings } from "@/lib/data/settings";
 import { localMedicalAI } from "@/server/local-ai/service";
 import { LocalAiEngine } from "./local-ai-engine";
 import { SettingsForm } from "./settings-form";
+import { UrologyTerms } from "./urology-terms";
+import { createClient } from "@/server/db/client";
+import { loadTaxonomy } from "@/server/urology/taxonomy";
 
 export const metadata: Metadata = { title: "Paramètres" };
 
 export default async function SettingsPage() {
   const user = await getCurrentUser();
-  const [settings, engine] = await Promise.all([getSettings(user.id), localMedicalAI.status()]);
+  const [settings, engine, terms] = await Promise.all([getSettings(user.id), localMedicalAI.status(), createClient().then(loadTaxonomy)]);
   return (
     <div className="space-y-8">
-      <PageHeader title="Paramètres" description="Profil, établissement, conservation des données et moteur IA local." />
+      <PageHeader title="Paramètres" description="Profil, établissement, conservation des données, moteur IA local et taxonomie urologique." />
       {settings.ok ? (
         <SettingsForm values={settings.data} email={user.email} />
       ) : (
@@ -29,6 +32,7 @@ export default async function SettingsPage() {
         </Alert>
       )}
       <LocalAiEngine initial={engine} />
+      <UrologyTerms custom={terms.custom} />
       <Card>
         <CardHeader>
           <CardTitle>Compte local</CardTitle>

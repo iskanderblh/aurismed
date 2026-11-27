@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { UUID_RE } from "@/lib/data/consultations";
 import { FIELD_BY_PATH } from "@/lib/medical/catalog";
-import { formDataSchema, isEmptyValue, type FieldValue } from "@/lib/medical/form-state";
+import { formDataSchema, isEmptyValue, type FieldValue, type ObservationFormData } from "@/lib/medical/form-state";
+import { maritimeEnabled } from "@/lib/medical/context";
+import { PRESENCE_LABEL } from "@/lib/urology/symptoms";
+import { loadTaxonomy } from "@/server/urology/taxonomy";
 import { createClient } from "@/server/db/client";
 import { buildProposals } from "@/server/ai/incremental";
 import type { PromptSegment } from "@/server/ai/prompt";
@@ -75,18 +78,31 @@ export async function POST(request: Request, { params }: RouteContext<"/api/cons
   if (!segments.length) return NextResponse.json({ ok: true, toSeq, proposals: null, model: null });
 
   // Valeurs déjà présentes (fiche enregistrée), pour que le modèle signale les contradictions.
-  const form = saved ? formDataSchema.safeParse(saved.form_data) : null;
-  const current = form?.success
-    ? Object.entries(form.data.fields)
-        .filter(([, s]) => !isEmptyValue(s.value))
-        .slice(0, 120)
-        .map(([path, s]) => ({ path, label: FIELD_BY_PATH.get(path)?.label ?? path, value: display(s.value) }))
+  const parsedForm = saved ? formDataSchema.safeParse(saved.form_data) : null;
+  const form = parsedForm?.success ? (parsedForm.data as ObservationFormData) : null;
+  const maritime = maritimeEnabled(form);
+  const { taxonomy } = await loadTaxonomy(db);
+  const names = new Map(taxonomy.map((t) => [t.id, t.name]));
+  const current = form
+    ? [
+        ...Object.entries(form.fields)
+          .filter(([, s]) => !isEmptyValue(s.value))
+          .slice(0, 120)
+          .map(([path, s]) => ({ path, label: FIELD_BY_PATH.get(path)?.label ?? path, value: display(s.value) })),
+        ...Object.entries(form.symptoms ?? {})
+          .slice(0, 80)
+          .map(([id, s]) => ({
+            path: `symptome ${id}`,
+            label: names.get(id) ?? id,
+            value: [PRESENCE_LABEL[s.presence], ...Object.entries(s.attrs).map(([k, v]) => `${k}: ${v}`)].join(", "),
+          })),
+      ]
     : [];
 
   try {
     const started = Date.now();
-    const result = await localMedicalAI.extractFromSegments({ segments, context, current, full: mode === "reconcile" });
-    const proposals = buildProposals(result.output, segments, { full: mode === "reconcile" });
+    const result = await localMedicalAI.extractFromSegments({ segments, context, current, full: mode === "reconcile", maritime, taxonomy });
+    const proposals = buildProposals(result.output, segments, { full: mode === "reconcile", maritime, taxonomy });
     await db.from("audit_logs").insert({
       user_id: auth.user.id,
       consultation_id: id,
@@ -98,6 +114,7 @@ export async function POST(request: Request, { params }: RouteContext<"/api/cons
         jusqu_a: toSeq,
         champs: proposals.fields.length,
         medicaments: proposals.medications.length,
+        symptomes: proposals.symptoms?.length ?? 0,
         ms: Date.now() - started,
       },
     });

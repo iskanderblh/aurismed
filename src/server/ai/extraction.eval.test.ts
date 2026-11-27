@@ -14,8 +14,12 @@ const enabled = (import.meta as { env?: { MODE?: string } }).env?.MODE === "eval
 describe.skipIf(!enabled)("évaluation de l'extraction (modèle local réel)", () => {
   for (const s of SCENARIOS) {
     it(s.name, { timeout: 600_000 }, async () => {
-      const { output, model } = await extractWithLocalModel(s.transcript);
-      const form = processExtraction(output, s.transcript, null, { model });
+      const maritime = s.maritime ?? true;
+      const { output, model } = await extractWithLocalModel(s.transcript, { maritime });
+      const form = processExtraction(output, s.transcript, null, { model, maritime });
+      for (const [id, presence] of Object.entries(s.symptoms ?? {})) {
+        expect(form.symptoms?.[id]?.presence, `symptôme ${id}`).toBe(presence);
+      }
       for (const [path, value] of Object.entries(s.expect)) {
         const v = form.fields[path]?.value;
         if (Array.isArray(value)) expect(v, path).toEqual(expect.arrayContaining(value));

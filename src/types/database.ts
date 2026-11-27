@@ -219,6 +219,38 @@ export type Database = {
         };
         Relationships: [];
       };
+      urology_terms: {
+        Row: {
+          id: string;
+          user_id: string;
+          code: string;
+          name: string;
+          category: string;
+          synonyms: string[];
+          description: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          code: string;
+          name: string;
+          category: string;
+          synonyms?: string[];
+          description?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          name?: string;
+          category?: string;
+          synonyms?: string[];
+          description?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       transcriptions: {
         Row: {
           id: string;

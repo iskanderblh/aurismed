@@ -1,12 +1,17 @@
 import { z } from "zod";
-import { AI_FIELD_PATHS } from "@/lib/medical/catalog";
+import { AI_FIELD_PATHS, AI_FIELDS, isMaritimeField } from "@/lib/medical/catalog";
+import { SYMPTOM_ATTRS } from "@/lib/medical/form-state";
+import { SYMPTOMS } from "@/lib/urology/taxonomy";
 
 /**
  * Format de réponse imposé au modèle (JSON Schema « strict ») : une liste
  * d'informations extraites, chacune rattachée à un champ connu du catalogue,
  * avec sa citation, sa confiance, qui l'a dite et sa nature.
  */
-export function extractionJsonSchema(options: { segments?: boolean } = {}) {
+export function extractionJsonSchema(options: { segments?: boolean; maritime?: boolean; symptomIds?: string[] } = {}) {
+  // Sans contexte maritime, les champs des sections CCMM ne sont pas proposés au modèle.
+  const paths = options.maritime === false ? AI_FIELDS.filter((f) => !isMaritimeField(f)).map((f) => f.path) : AI_FIELD_PATHS;
+  const symptomIds = options.symptomIds ?? SYMPTOMS.map((x) => x.id);
   // Analyse au fil de la consultation : chaque information indique le numéro de la réplique citée.
   const seg = options.segments ? { segment: { type: "integer" } } : {};
   const segReq = options.segments ? (["segment"] as const) : ([] as const);
@@ -19,7 +24,7 @@ export function extractionJsonSchema(options: { segments?: boolean } = {}) {
     schema: {
       type: "object",
       additionalProperties: false,
-      required: ["fields", "medications", "contradictions", "missing_important"],
+      required: ["fields", "symptoms", "medications", "contradictions", "missing_important"],
       properties: {
         fields: {
           type: "array",
@@ -29,13 +34,32 @@ export function extractionJsonSchema(options: { segments?: boolean } = {}) {
             required: ["path", "value", "confidence", "speaker", "kind", "source_quote", "note", ...segReq],
             properties: {
               ...seg,
-              path: { type: "string", enum: AI_FIELD_PATHS },
+              path: { type: "string", enum: paths },
               value: str,
               confidence,
               speaker: { type: "string", enum: ["patient", "doctor", "onboard_caregiver", "unknown"] },
               kind: { type: "string", enum: ["reported", "observed", "measured", "instruction"] },
               source_quote: str,
               note: nullableStr,
+            },
+          },
+        },
+        symptoms: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "presence", "expression", ...SYMPTOM_ATTRS, "confidence", "speaker", "kind", "source_quote", ...segReq],
+            properties: {
+              ...seg,
+              id: { type: "string", enum: symptomIds },
+              presence: { type: "string", enum: ["yes", "no", "uncertain"] },
+              expression: str,
+              ...Object.fromEntries(SYMPTOM_ATTRS.map((k) => [k, nullableStr])),
+              confidence,
+              speaker: { type: "string", enum: ["patient", "doctor", "onboard_caregiver", "unknown"] },
+              kind: { type: "string", enum: ["reported", "observed", "measured", "instruction"] },
+              source_quote: str,
             },
           },
         },
@@ -64,7 +88,7 @@ export function extractionJsonSchema(options: { segments?: boolean } = {}) {
             additionalProperties: false,
             required: ["paths", "description", "quotes"],
             properties: {
-              paths: { type: "array", items: { type: "string", enum: AI_FIELD_PATHS } },
+              paths: { type: "array", items: { type: "string", enum: paths } },
               description: str,
               quotes: { type: "array", items: str },
             },
@@ -76,7 +100,7 @@ export function extractionJsonSchema(options: { segments?: boolean } = {}) {
             type: "object",
             additionalProperties: false,
             required: ["path", "reason"],
-            properties: { path: { type: "string", enum: AI_FIELD_PATHS }, reason: str },
+            properties: { path: { type: "string", enum: paths }, reason: str },
           },
         },
       },
@@ -103,6 +127,26 @@ export const aiOutputSchema = z.object({
       }),
     )
     .max(400),
+  // Absent des réponses des modèles plus anciens : liste vide par défaut.
+  symptoms: z
+    .array(
+      z.object({
+        id: z.string().regex(/^[a-z0-9_]{2,60}$/),
+        presence: z.enum(["yes", "no", "uncertain"]),
+        expression: z.string().max(1000),
+        ...(Object.fromEntries(SYMPTOM_ATTRS.map((k) => [k, z.string().max(1000).nullable().optional()])) as Record<
+          (typeof SYMPTOM_ATTRS)[number],
+          z.ZodOptional<z.ZodNullable<z.ZodString>>
+        >),
+        confidence: conf,
+        speaker: z.enum(["patient", "doctor", "onboard_caregiver", "unknown"]),
+        kind: z.enum(["reported", "observed", "measured", "instruction"]),
+        source_quote: z.string().max(4000),
+        segment: z.number().int().nullable().optional(),
+      }),
+    )
+    .max(150)
+    .default([]),
   medications: z
     .array(
       z.object({

@@ -17,7 +17,7 @@ const item = (p: Partial<Item> & Pick<Item, "path" | "value" | "source_quote">):
   note: null,
   ...p,
 });
-const out = (fields: Item[], extra: Partial<AiOutput> = {}): AiOutput => ({ fields, medications: [], contradictions: [], missing_important: [], ...extra });
+const out = (fields: Item[], extra: Partial<AiOutput> = {}): AiOutput => ({ fields, symptoms: [], medications: [], contradictions: [], missing_important: [], ...extra });
 
 const example = out([
   item({ path: "history.illnessHistory", value: "Douleur abdominale depuis hier soir.", source_quote: "douleur abdominale depuis hier soir" }),
@@ -145,6 +145,7 @@ describe("scénarios d'évaluation", async () => {
   const { SCENARIOS } = await import("./scenarios");
   const { FIELD_BY_PATH } = await import("@/lib/medical/catalog");
   const { isValidManualValue } = await import("@/lib/medical/form-state");
+  const { SYMPTOM_BY_ID } = await import("@/lib/urology/taxonomy");
   it("ne référencent que des champs et valeurs du catalogue", () => {
     for (const s of SCENARIOS) {
       for (const [p, v] of Object.entries(s.expect)) {
@@ -153,6 +154,7 @@ describe("scénarios d'évaluation", async () => {
         expect(isValidManualValue(f!, v), `${s.name} ${p}`).toBe(true);
       }
       for (const p of [...s.absent, ...(s.expectNeedsVerification ?? [])]) expect(FIELD_BY_PATH.get(p), p).toBeDefined();
+      for (const id of Object.keys(s.symptoms ?? {})) expect(SYMPTOM_BY_ID.get(id), id).toBeDefined();
     }
   });
 });

@@ -133,23 +133,28 @@ export type ObservationStageData = {
   form: import("@/lib/medical/form-state").ObservationFormData | null;
   validationStatus: import("@/types/database").ObservationValidationStatus | null;
   validatedAt: string | null;
+  /** Termes urologiques ajoutés par le médecin (s'ajoutent à la taxonomie intégrée). */
+  customTerms: import("@/lib/urology/taxonomy").CustomTerm[];
 };
 
 /** Fiche d'observation enregistrée (validée par le schéma ; null si absente ou illisible). */
 export async function getObservationStageData(consultationId: string | null): Promise<ObservationStageData> {
-  if (!consultationId) return { form: null, validationStatus: null, validatedAt: null };
-  const { formDataSchema } = await import("@/lib/medical/form-state");
   const db = await createClient();
+  const { loadTaxonomy } = await import("@/server/urology/taxonomy");
+  const { custom: customTerms } = await loadTaxonomy(db);
+  if (!consultationId) return { form: null, validationStatus: null, validatedAt: null, customTerms };
+  const { formDataSchema } = await import("@/lib/medical/form-state");
   const { data } = await db
     .from("observation_forms")
     .select("form_data, validation_status, validated_at")
     .eq("consultation_id", consultationId)
     .maybeSingle();
-  if (!data) return { form: null, validationStatus: null, validatedAt: null };
+  if (!data) return { form: null, validationStatus: null, validatedAt: null, customTerms };
   const parsed = formDataSchema.safeParse(data.form_data);
   return {
     form: parsed.success ? (parsed.data as import("@/lib/medical/form-state").ObservationFormData) : null,
     validationStatus: data.validation_status,
     validatedAt: data.validated_at,
+    customTerms,
   };
 }

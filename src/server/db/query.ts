@@ -45,6 +45,7 @@ const META: Record<TableName, TableMeta> = {
     updatedAt: true,
   },
   recordings: { owner: "user_id", json: [], consultation: "required", id: "uuid", updatedAt: false },
+  urology_terms: { owner: "user_id", json: ["synonyms"], consultation: "none", id: "uuid", updatedAt: true },
   transcription_segments: { owner: "user_id", json: [], consultation: "required", id: "uuid", updatedAt: true },
   transcriptions: { owner: "user_id", json: [], consultation: "required", id: "uuid", updatedAt: true },
   observation_forms: {

@@ -25,6 +25,7 @@ import {
   type Speaker,
 } from "./form-state";
 import { normalizeForMatch } from "./quotes";
+import { applySymptomProposals, type SymptomProposal } from "@/lib/urology/symptoms";
 
 export type FieldProposal = {
   path: string;
@@ -42,6 +43,8 @@ export type FieldProposal = {
 export type ProposalSet = {
   fields: FieldProposal[];
   medications: Omit<MedicationLine, "id" | "origin" | "status">[];
+  /** Symptômes urologiques (taxonomie). */
+  symptoms?: SymptomProposal[];
   contradictions: Contradiction[];
   /** Renseigné seulement par une réanalyse de toute la consultation. */
   missing?: MissingItem[];
@@ -154,6 +157,12 @@ export function applyProposals(
     contradictions: contradictions.slice(-50),
     discarded: [...form.discarded, ...set.discarded].slice(-200),
   };
+  if (set.symptoms?.length) {
+    const r = applySymptomProposals(form.symptoms ?? {}, set.symptoms);
+    next.symptoms = r.symptoms;
+    report.filled.push(...r.filled.map((id) => `symptome:${id}`));
+    report.conflicts.push(...r.conflicts.map((id) => `symptome:${id}`));
+  }
   if (set.missing) next.missing = set.missing.filter((m) => isEmptyValue(fields[m.path]?.value));
   return { form: next, report };
 }

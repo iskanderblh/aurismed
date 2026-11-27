@@ -40,6 +40,59 @@ import { printableLines, type PrescriptionLine } from "@/lib/prescription/schema
 import { useRouter } from "next/navigation";
 import { WorkflowSteps } from "./workflow-steps";
 import { formatInZone } from "@/lib/time";
+import { cn } from "@/lib/utils";
+
+type PanelId = "patient" | "audio" | "form";
+type Panels = Record<PanelId, boolean>;
+
+/** Largeurs des trois panneaux sur grand écran ; un panneau replié garde une bande de 3 rem. */
+function panelColumns(p: Panels) {
+  return [p.patient ? "minmax(16rem,22rem)" : "3rem", p.audio ? "minmax(0,1fr)" : "3rem", p.form ? "minmax(0,1.4fr)" : "3rem"].join(" ");
+}
+
+/**
+ * Panneau repliable. Le contenu reste monté quand il est replié (simplement
+ * masqué) : un enregistrement en cours ou une fiche en édition ne sont jamais
+ * interrompus.
+ */
+function Panel({
+  id,
+  title,
+  icon,
+  open,
+  onToggle,
+  sticky,
+  children,
+}: {
+  /** Reste visible pendant le défilement de la fiche (grand écran). */
+  sticky?: boolean;
+  id: PanelId;
+  title: string;
+  icon: React.ReactNode;
+  open: boolean;
+  onToggle: (id: PanelId) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section data-panel={id} data-open={open} aria-label={title} className={cn("@container min-w-0 space-y-4", sticky && "xl:sticky xl:top-4 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto xl:pb-2")}>
+      <button
+        type="button"
+        onClick={() => onToggle(id)}
+        aria-expanded={open}
+        className={cn(
+          "flex w-full items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-left text-sm font-semibold hover:bg-muted",
+          !open && "xl:h-64 xl:w-12 xl:flex-col xl:justify-start xl:px-0 xl:py-3",
+        )}
+        title={open ? `Replier : ${title}` : `Déplier : ${title}`}
+      >
+        {icon}
+        <span className={cn("min-w-0 flex-1", !open && "xl:flex-none xl:[writing-mode:vertical-rl]")}>{title}</span>
+        <span className={cn("text-xs font-normal text-muted-foreground", !open && "xl:hidden")}>{open ? "Replier" : "Déplier"}</span>
+      </button>
+      <div className={cn("space-y-4", !open && "hidden")}>{children}</div>
+    </section>
+  );
+}
 
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 type PortKey = "originPort" | "destination" | "plannedCall" | "possibleCall";
@@ -97,6 +150,8 @@ export function ConsultationWorkspace({
   const [rxLines, setRxLines] = useState<PrescriptionLine[]>(prescriptionData.data?.lines ?? []);
   const [transcription, setTranscription] = useState<TranscriptionInfo | null>(recordingData.transcription);
   const [live, setLive] = useState<{ segments: LiveSegmentInfo[]; recording: boolean }>({ segments: recordingData.liveSegments, recording: false });
+  const [panels, setPanels] = useState<Panels>({ patient: true, audio: true, form: true });
+  const togglePanel = (p: PanelId) => setPanels((x) => ({ ...x, [p]: !x[p] }));
   const [step, setStep] = useState(() => {
     if (prescriptionData.validationStatus === "validated") return 6;
     if (observationData.validationStatus === "validated") return 5;
@@ -226,153 +281,161 @@ export function ConsultationWorkspace({
     <div className="space-y-6 pb-28">
       <WorkflowSteps current={step} completed={Array.from({ length: step }, (_, i) => i)} />
 
-      <FormSection
-        title="Appel"
-        description="Date, heure d'appel locale, ATU, médecin CCMM, responsable de soins"
-        icon={<PhoneCall className="size-4" />}
-      >
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <TextField label="Date" type="date" value={c.callDate ?? ""} onChange={(x) => setCall("callDate", x)} error={err("call.callDate")} />
-          <TextField label="Heure d'appel locale" type="time" value={c.callTime ?? ""} onChange={(x) => setCall("callTime", x)} error={err("call.callTime")} />
-          <TextField label="ATU" value={c.atu ?? ""} onChange={(x) => setCall("atu", x)} error={err("call.atu")} />
-          <TextField label="Médecin CCMM" value={c.ccmmDoctor ?? ""} onChange={(x) => setCall("ccmmDoctor", x)} error={err("call.ccmmDoctor")} />
-          <TextField label="Responsable de soins" value={c.careManager ?? ""} onChange={(x) => setCall("careManager", x)} error={err("call.careManager")} />
-        </div>
-      </FormSection>
-
-      <FormSection
-        title="Patient"
-        description="Identité et fonction à bord"
-        icon={<User className="size-4" />}
-        badge={<Badge variant="secondary">{filledCount(p)}/8</Badge>}
-      >
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <TextField label="Nom" value={p.lastName ?? ""} onChange={(x) => setPatient("lastName", x)} error={err("patient.lastName")} autoComplete="off" className="lg:col-span-2" />
-          <TextField label="Prénom" value={p.firstName ?? ""} onChange={(x) => setPatient("firstName", x)} error={err("patient.firstName")} autoComplete="off" className="lg:col-span-2" />
-          <TextField label="Date de naissance" type="date" value={p.dateOfBirth ?? ""} onChange={onDateOfBirth} error={err("patient.dateOfBirth")} />
-          <TextField
-            label="Âge"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={130}
-            value={String(p.age ?? "")}
-            onChange={(x) => setPatient("age", x)}
-            error={err("patient.age")}
-            hint={p.dateOfBirth ? "Calculé depuis la date de naissance" : undefined}
-          />
-          <TextField label="Nationalité" value={p.nationality ?? ""} onChange={(x) => setPatient("nationality", x)} error={err("patient.nationality")} />
-          <ChoiceField
-            label="Sexe"
-            value={(p.gender ?? "") as "M" | "F" | ""}
-            options={[
-              { value: "M", label: "M" },
-              { value: "F", label: "F" },
-            ]}
-            onChange={(x) => setPatient("gender", x)}
-          />
-          <TextField label="N° d'immatriculation" value={p.registrationNumber ?? ""} onChange={(x) => setPatient("registrationNumber", x)} error={err("patient.registrationNumber")} className="lg:col-span-2" />
-          <TextField label="Fonction" value={p.role ?? ""} onChange={(x) => setPatient("role", x)} error={err("patient.role")} className="lg:col-span-2" />
-        </div>
-      </FormSection>
-
-      <FormSection
-        title="Navire"
-        description="Tous les champs sont facultatifs"
-        defaultOpen={false}
-        icon={<Ship className="size-4" />}
-        badge={<Badge variant="secondary">{filledCount(v)} renseigné{filledCount(v) > 1 ? "s" : ""}</Badge>}
-      >
-        <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <TextField label="Nom du navire" value={v.name ?? ""} onChange={(x) => setVessel("name", x)} error={err("vessel.name")} />
-            <TextField label="Pavillon" value={v.flag ?? ""} onChange={(x) => setVessel("flag", x)} error={err("vessel.flag")} />
-            <TextField label="Type" value={v.type ?? ""} onChange={(x) => setVessel("type", x)} error={err("vessel.type")} />
-            <div className="flex flex-wrap items-end gap-4">
-              <ChoiceField
-                label="Dotation"
-                value={(v.allocation ?? "") as "A" | "B" | "C" | ""}
-                options={[
-                  { value: "A", label: "A" },
-                  { value: "B", label: "B" },
-                  { value: "C", label: "C" },
-                ]}
-                onChange={(x) => setVessel("allocation", x)}
-              />
-              <div className="pb-2">
-                <CheckboxField label="B ou C restreinte" checked={Boolean(v.allocationRestricted)} onChange={(x) => setVessel("allocationRestricted", x)} />
-              </div>
-            </div>
-            <TextField label="Armement" value={v.owner ?? ""} onChange={(x) => setVessel("owner", x)} error={err("vessel.owner")} />
-            <TextField label="Indicatif radio / MMSI" value={v.callSignMmsi ?? ""} onChange={(x) => setVessel("callSignMmsi", x)} error={err("vessel.callSignMmsi")} />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <TextField label="Tél. passerelle" type="tel" value={v.bridgePhone ?? ""} onChange={(x) => setVessel("bridgePhone", x)} error={err("vessel.bridgePhone")} />
-            <TextField label="Tél. infirmerie" type="tel" value={v.infirmaryPhone ?? ""} onChange={(x) => setVessel("infirmaryPhone", x)} error={err("vessel.infirmaryPhone")} />
-            <TextField label="Fax" type="tel" value={v.fax ?? ""} onChange={(x) => setVessel("fax", x)} error={err("vessel.fax")} />
-            <TextField label="E-mail" type="email" value={v.email ?? ""} onChange={(x) => setVessel("email", x)} error={err("vessel.email")} />
-            <TextField label="Telex" value={v.telex ?? ""} onChange={(x) => setVessel("telex", x)} error={err("vessel.telex")} />
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField label="Coordonnées GPS" placeholder="ex. 43°17'N / 005°22'E" value={v.gpsCoordinates ?? ""} onChange={(x) => setVessel("gpsCoordinates", x)} error={err("vessel.gpsCoordinates")} />
-            <TextField label="Position" value={v.position ?? ""} onChange={(x) => setVessel("position", x)} error={err("vessel.position")} />
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-sm font-medium">Route et escales</p>
-            <div className="divide-y rounded-lg border">
-              {PORTS.map((port) => (
-                <div key={port.key} className="grid gap-3 p-3 sm:grid-cols-[1fr_14rem] sm:items-end">
-                  <TextField label={port.label} value={v[port.key]?.name ?? ""} onChange={(x) => setPort(port.key, "name", x)} error={err(`vessel.${port.key}.name`)} />
-                  <TextField label="Date ou délai" value={v[port.key]?.dateOrDelay ?? ""} onChange={(x) => setPort(port.key, "dateOrDelay", x)} error={err(`vessel.${port.key}.dateOrDelay`)} />
+      <div data-wide className="space-y-3">
+        <div className="grid gap-4 xl:grid-cols-(--panels) xl:items-start" style={{ "--panels": panelColumns(panels) } as React.CSSProperties}>
+          <Panel id="patient" title="Patient" icon={<User className="size-4" />} open={panels.patient} onToggle={togglePanel} sticky>
+              <FormSection
+                title="Patient"
+                description="Identité et fonction à bord"
+                icon={<User className="size-4" />}
+                badge={<Badge variant="secondary">{filledCount(p)}/8</Badge>}
+              >
+                <div className="grid gap-4 @md:grid-cols-2 @3xl:grid-cols-4">
+                  <TextField label="Nom" value={p.lastName ?? ""} onChange={(x) => setPatient("lastName", x)} error={err("patient.lastName")} autoComplete="off" className="@3xl:col-span-2" />
+                  <TextField label="Prénom" value={p.firstName ?? ""} onChange={(x) => setPatient("firstName", x)} error={err("patient.firstName")} autoComplete="off" className="@3xl:col-span-2" />
+                  <TextField label="Date de naissance" type="date" value={p.dateOfBirth ?? ""} onChange={onDateOfBirth} error={err("patient.dateOfBirth")} />
+                  <TextField
+                    label="Âge"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    max={130}
+                    value={String(p.age ?? "")}
+                    onChange={(x) => setPatient("age", x)}
+                    error={err("patient.age")}
+                    hint={p.dateOfBirth ? "Calculé depuis la date de naissance" : undefined}
+                  />
+                  <TextField label="Nationalité" value={p.nationality ?? ""} onChange={(x) => setPatient("nationality", x)} error={err("patient.nationality")} />
+                  <ChoiceField
+                    label="Sexe"
+                    value={(p.gender ?? "") as "M" | "F" | ""}
+                    options={[
+                      { value: "M", label: "M" },
+                      { value: "F", label: "F" },
+                    ]}
+                    onChange={(x) => setPatient("gender", x)}
+                  />
+                  <TextField label="N° d'immatriculation" value={p.registrationNumber ?? ""} onChange={(x) => setPatient("registrationNumber", x)} error={err("patient.registrationNumber")} className="@3xl:col-span-2" />
+                  <TextField label="Fonction" value={p.role ?? ""} onChange={(x) => setPatient("role", x)} error={err("patient.role")} className="@3xl:col-span-2" />
                 </div>
-              ))}
-            </div>
-          </div>
+              </FormSection>
+
+              <FormSection
+                title="Appel"
+                description="Date, heure d'appel locale, ATU, médecin CCMM, responsable de soins"
+                icon={<PhoneCall className="size-4" />}
+              >
+                <div className="grid gap-4 @md:grid-cols-2 @3xl:grid-cols-3">
+                  <TextField label="Date" type="date" value={c.callDate ?? ""} onChange={(x) => setCall("callDate", x)} error={err("call.callDate")} />
+                  <TextField label="Heure d'appel locale" type="time" value={c.callTime ?? ""} onChange={(x) => setCall("callTime", x)} error={err("call.callTime")} />
+                  <TextField label="ATU" value={c.atu ?? ""} onChange={(x) => setCall("atu", x)} error={err("call.atu")} />
+                  <TextField label="Médecin CCMM" value={c.ccmmDoctor ?? ""} onChange={(x) => setCall("ccmmDoctor", x)} error={err("call.ccmmDoctor")} />
+                  <TextField label="Responsable de soins" value={c.careManager ?? ""} onChange={(x) => setCall("careManager", x)} error={err("call.careManager")} />
+                </div>
+              </FormSection>
+
+              <FormSection
+                title="Navire"
+                description="Tous les champs sont facultatifs"
+                defaultOpen={false}
+                icon={<Ship className="size-4" />}
+                badge={<Badge variant="secondary">{filledCount(v)} renseigné{filledCount(v) > 1 ? "s" : ""}</Badge>}
+              >
+                <div className="space-y-6">
+                  <div className="grid gap-4 @md:grid-cols-2 @3xl:grid-cols-3">
+                    <TextField label="Nom du navire" value={v.name ?? ""} onChange={(x) => setVessel("name", x)} error={err("vessel.name")} />
+                    <TextField label="Pavillon" value={v.flag ?? ""} onChange={(x) => setVessel("flag", x)} error={err("vessel.flag")} />
+                    <TextField label="Type" value={v.type ?? ""} onChange={(x) => setVessel("type", x)} error={err("vessel.type")} />
+                    <div className="flex flex-wrap items-end gap-4">
+                      <ChoiceField
+                        label="Dotation"
+                        value={(v.allocation ?? "") as "A" | "B" | "C" | ""}
+                        options={[
+                          { value: "A", label: "A" },
+                          { value: "B", label: "B" },
+                          { value: "C", label: "C" },
+                        ]}
+                        onChange={(x) => setVessel("allocation", x)}
+                      />
+                      <div className="pb-2">
+                        <CheckboxField label="B ou C restreinte" checked={Boolean(v.allocationRestricted)} onChange={(x) => setVessel("allocationRestricted", x)} />
+                      </div>
+                    </div>
+                    <TextField label="Armement" value={v.owner ?? ""} onChange={(x) => setVessel("owner", x)} error={err("vessel.owner")} />
+                    <TextField label="Indicatif radio / MMSI" value={v.callSignMmsi ?? ""} onChange={(x) => setVessel("callSignMmsi", x)} error={err("vessel.callSignMmsi")} />
+                  </div>
+
+                  <div className="grid gap-4 @md:grid-cols-2 @3xl:grid-cols-3">
+                    <TextField label="Tél. passerelle" type="tel" value={v.bridgePhone ?? ""} onChange={(x) => setVessel("bridgePhone", x)} error={err("vessel.bridgePhone")} />
+                    <TextField label="Tél. infirmerie" type="tel" value={v.infirmaryPhone ?? ""} onChange={(x) => setVessel("infirmaryPhone", x)} error={err("vessel.infirmaryPhone")} />
+                    <TextField label="Fax" type="tel" value={v.fax ?? ""} onChange={(x) => setVessel("fax", x)} error={err("vessel.fax")} />
+                    <TextField label="E-mail" type="email" value={v.email ?? ""} onChange={(x) => setVessel("email", x)} error={err("vessel.email")} />
+                    <TextField label="Telex" value={v.telex ?? ""} onChange={(x) => setVessel("telex", x)} error={err("vessel.telex")} />
+                  </div>
+
+                  <div className="grid gap-4 @md:grid-cols-2">
+                    <TextField label="Coordonnées GPS" placeholder="ex. 43°17'N / 005°22'E" value={v.gpsCoordinates ?? ""} onChange={(x) => setVessel("gpsCoordinates", x)} error={err("vessel.gpsCoordinates")} />
+                    <TextField label="Position" value={v.position ?? ""} onChange={(x) => setVessel("position", x)} error={err("vessel.position")} />
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium">Route et escales</p>
+                    <div className="divide-y rounded-lg border">
+                      {PORTS.map((port) => (
+                        <div key={port.key} className="grid gap-3 p-3 @lg:grid-cols-[1fr_14rem] @lg:items-end">
+                          <TextField label={port.label} value={v[port.key]?.name ?? ""} onChange={(x) => setPort(port.key, "name", x)} error={err(`vessel.${port.key}.name`)} />
+                          <TextField label="Date ou délai" value={v[port.key]?.dateOrDelay ?? ""} onChange={(x) => setPort(port.key, "dateOrDelay", x)} error={err(`vessel.${port.key}.dateOrDelay`)} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </FormSection>
+          </Panel>
+          <Panel id="audio" title="Audio et transcription en direct" icon={<Mic className="size-4" />} open={panels.audio} onToggle={togglePanel} sticky>
+              <FormSection
+                title="Enregistrement et transcription"
+                description="Consentement, enregistrement de la consultation, transcription et correction"
+                icon={<Mic className="size-4" />}
+              >
+                <RecordingStage
+                  consultationId={id}
+                  ensureId={ensureId}
+                  data={recordingData}
+                  onProgress={(n) => setStep((s) => Math.max(s, n))}
+                  onTranscriptionChange={setTranscription}
+                  onLiveChange={setLive}
+                />
+              </FormSection>
+          </Panel>
+          <Panel id="form" title="Fiche d'urologie" icon={<ClipboardCheck className="size-4" />} open={panels.form} onToggle={togglePanel}>
+              <FormSection
+                title="Fiche d'observation médicale"
+                description="Propositions de l'IA à vérifier, corriger ou rejeter, puis validation par le médecin"
+                icon={<ClipboardCheck className="size-4" />}
+              >
+                <ObservationReview
+                  consultationId={id}
+                  transcription={transcription}
+                  providerConfigured={recordingData.extractionConfigured}
+                  providerLabel={recordingData.providerLabel}
+                  initial={observationData}
+                  onProgress={(n) => setStep((s) => Math.max(s, n))}
+                  onFormChange={(f) => {
+                    setMedications(f.medications);
+                    setAllergy(allergyText(f));
+                  }}
+                  prescriptionLines={rxLines}
+                  defaultDoctor={prescriptionData.prescriber.fullName}
+                  onStatusChange={() => router.refresh()}
+                  liveSegments={live.segments}
+                  recording={live.recording}
+                  onValidationChange={(v) => setObsState({ validated: v === "validated", validatedAt: v === "validated" ? new Date().toISOString() : null })}
+                />
+              </FormSection>
+          </Panel>
         </div>
-      </FormSection>
-
-      <FormSection
-        title="Enregistrement et transcription"
-        description="Consentement, enregistrement de la consultation, transcription et correction"
-        icon={<Mic className="size-4" />}
-      >
-        <RecordingStage
-          consultationId={id}
-          ensureId={ensureId}
-          data={recordingData}
-          onProgress={(n) => setStep((s) => Math.max(s, n))}
-          onTranscriptionChange={setTranscription}
-          onLiveChange={setLive}
-        />
-      </FormSection>
-
-      <FormSection
-        title="Fiche d'observation médicale"
-        description="Propositions de l'IA à vérifier, corriger ou rejeter, puis validation par le médecin"
-        icon={<ClipboardCheck className="size-4" />}
-      >
-        <ObservationReview
-          consultationId={id}
-          transcription={transcription}
-          providerConfigured={recordingData.extractionConfigured}
-          providerLabel={recordingData.providerLabel}
-          initial={observationData}
-          onProgress={(n) => setStep((s) => Math.max(s, n))}
-          onFormChange={(f) => {
-            setMedications(f.medications);
-            setAllergy(allergyText(f));
-          }}
-          prescriptionLines={rxLines}
-          defaultDoctor={prescriptionData.prescriber.fullName}
-          onStatusChange={() => router.refresh()}
-          liveSegments={live.segments}
-          recording={live.recording}
-          onValidationChange={(v) => setObsState({ validated: v === "validated", validatedAt: v === "validated" ? new Date().toISOString() : null })}
-        />
-      </FormSection>
+      </div>
 
       <FormSection
         title="Ordonnance"

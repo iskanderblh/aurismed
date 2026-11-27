@@ -200,4 +200,23 @@ create table transcription_segments (
 );
 `,
   },
+  {
+    id: "0004_urology_terms",
+    sql: `
+-- Termes urologiques ajoutés par le médecin : nouveau symptôme (code custom_...)
+-- ou synonymes d'un symptôme de la taxonomie intégrée (code de ce symptôme).
+create table urology_terms (
+  id text primary key,
+  user_id text not null references profiles (id) on delete cascade,
+  code text not null check (length(code) between 2 and 60),
+  name text not null check (length(name) between 1 and 120),
+  category text not null,
+  synonyms text not null default '[]',
+  description text not null default '',
+  created_at text not null,
+  updated_at text not null,
+  unique (user_id, code)
+);
+`,
+  },
 ];

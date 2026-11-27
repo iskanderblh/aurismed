@@ -172,3 +172,24 @@ describe("stockage chiffré", () => {
     expect((await db.storage.from("recordings").list(`${alice.id}/${c!.id}`)).data).toEqual([]);
   });
 });
+
+describe("taxonomie urologique du médecin", () => {
+  it("enregistre termes et synonymes par médecin, avec un code unique", async () => {
+    const { loadTaxonomy } = await import("@/server/urology/taxonomy");
+    const a = clientForUser(alice);
+    const b = clientForUser(bob);
+    expect((await a.from("urology_terms").insert({ code: "nycturie", name: "Nycturie", category: "filling", synonyms: ["je me relève la nuit"] })).error).toBeNull();
+    expect((await a.from("urology_terms").insert({ code: "custom_gene_perineale", name: "Gêne périnéale", category: "pain", synonyms: [] })).error).toBeNull();
+    // code unique par médecin
+    expect((await a.from("urology_terms").insert({ code: "nycturie", name: "Nycturie", category: "filling" })).error).not.toBeNull();
+    const mine = await loadTaxonomy(a);
+    expect(mine.custom.map((c) => c.code).sort()).toEqual(["custom_gene_perineale", "nycturie"]);
+    expect(mine.taxonomy.find((t) => t.id === "nycturie")!.synonyms).toContain("je me relève la nuit");
+    // un autre médecin ne voit pas ces ajouts
+    const theirs = await loadTaxonomy(b);
+    expect(theirs.custom).toEqual([]);
+    expect(theirs.taxonomy.find((t) => t.id === "nycturie")!.synonyms).not.toContain("je me relève la nuit");
+    await a.from("urology_terms").delete().eq("code", "custom_gene_perineale");
+    expect((await loadTaxonomy(a)).custom.map((c) => c.code)).toEqual(["nycturie"]);
+  });
+});

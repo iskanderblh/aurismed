@@ -3,15 +3,21 @@ import { selectedOllamaModel } from "@/server/local-ai/config";
 import { LocalAiError } from "@/server/local-ai/errors";
 import { ollamaChatJson } from "@/server/local-ai/ollama";
 import { aiOutputSchema, extractionJsonSchema, type AiOutput } from "./schema";
-import { INCREMENTAL_RULES, SYSTEM_PROMPT, incrementalUserPrompt, userPrompt, type PromptSegment } from "./prompt";
+import { INCREMENTAL_RULES, incrementalUserPrompt, systemPrompt, userPrompt, type PromptSegment } from "./prompt";
+import { SYMPTOMS, type SymptomDef } from "@/lib/urology/taxonomy";
+
+export type ExtractionOptions = { maritime?: boolean; taxonomy?: SymptomDef[] };
+
+const schemaFor = (o: ExtractionOptions, segments: boolean) =>
+  extractionJsonSchema({ segments, maritime: o.maritime ?? false, symptomIds: (o.taxonomy ?? SYMPTOMS).map((x) => x.id) }).schema;
 
 /**
  * Extraction de la fiche par le modèle local (Ollama), sortie JSON contrainte
  * par le même schéma qu'avant, puis validée avec Zod. Une réponse invalide est
  * retentée une fois. Aucun repli vers un service en ligne.
  */
-export async function extractWithLocalModel(transcript: string): Promise<{ output: AiOutput; model: string }> {
-  return run(SYSTEM_PROMPT, userPrompt(transcript), extractionJsonSchema().schema);
+export async function extractWithLocalModel(transcript: string, options: ExtractionOptions = {}): Promise<{ output: AiOutput; model: string }> {
+  return run(systemPrompt(options), userPrompt(transcript, options), schemaFor(options, false));
 }
 
 /** Analyse des nouvelles répliques (ou relecture de toute la consultation) de la transcription en direct. */
@@ -20,8 +26,8 @@ export async function extractFromSegments(input: {
   context: PromptSegment[];
   current: { path: string; label: string; value: string }[];
   full: boolean;
-}): Promise<{ output: AiOutput; model: string }> {
-  return run(SYSTEM_PROMPT + INCREMENTAL_RULES, incrementalUserPrompt(input), extractionJsonSchema({ segments: true }).schema);
+} & ExtractionOptions): Promise<{ output: AiOutput; model: string }> {
+  return run(systemPrompt(input) + INCREMENTAL_RULES, incrementalUserPrompt(input), schemaFor(input, true));
 }
 
 async function run(system: string, user: string, schema: object): Promise<{ output: AiOutput; model: string }> {

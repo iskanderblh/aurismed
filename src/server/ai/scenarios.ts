@@ -5,7 +5,7 @@
  * expect : valeurs qui doivent être proposées.
  * absent : champs qui ne doivent PAS être remplis (contrôle des inventions).
  */
-import type { FieldValue } from "@/lib/medical/form-state";
+import type { FieldValue, SymptomPresence } from "@/lib/medical/form-state";
 
 export type Scenario = {
   name: string;
@@ -16,9 +16,30 @@ export type Scenario = {
   noMedications?: boolean;
   expectContradiction?: boolean;
   expectNeedsVerification?: string[];
+  /** Sections maritimes proposées au modèle (vrai par défaut, faux pour l'urologie). */
+  maritime?: boolean;
+  /** Symptômes urologiques attendus avec leur présence. */
+  symptoms?: Record<string, SymptomPresence>;
 };
 
 export const SCENARIOS: Scenario[] = [
+  {
+    name: "Brûlures mictionnelles (urologie, exemple du cahier des charges)",
+    maritime: false,
+    transcript:
+      "Médecin : Bonjour, qu'est-ce qui vous amène ? Patient : J'ai des brûlures quand je fais pipi depuis trois jours. Médecin : Vous y allez plus souvent ? Patient : Oui, toutes les heures dans la journée, et je me lève trois fois la nuit. Médecin : Vous avez vu du sang dans les urines ? Patient : Non. Médecin : Vous avez de la fièvre ? Patient : Non, pas de fièvre. Médecin : Des douleurs dans le dos ? Patient : Non plus.",
+    expect: {},
+    symptoms: {
+      brulures_mictionnelles: "yes",
+      pollakiurie_diurne: "yes",
+      nycturie: "yes",
+      hematurie_macro: "no",
+      fievre: "no",
+      douleur_lombaire: "no",
+    },
+    absent: ["uro.exam.temperature", "uro.exam.prostate", "uro.exam.abdomen", "uro.lab.psa", "uro.lab.dipstick", "teleconsultation.diagnosticHypotheses"],
+    noMedications: true,
+  },
   {
     name: "Douleur abdominale fébrile (exemple du cahier des charges)",
     transcript:

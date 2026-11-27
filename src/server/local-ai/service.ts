@@ -58,8 +58,8 @@ export class LocalMedicalAIService {
     return this.whisper.transcribe(input);
   }
 
-  async extractObservation(transcript: string) {
-    return extractWithLocalModel(transcript);
+  async extractObservation(transcript: string, options: Parameters<typeof extractWithLocalModel>[1] = {}) {
+    return extractWithLocalModel(transcript, options);
   }
 
   /** Analyse au fil de la consultation (nouvelles répliques, ou relecture d'ensemble). */
@@ -122,14 +122,18 @@ export class LocalMedicalAIService {
   async testExtraction() {
     const scenario = SCENARIOS[0];
     const started = Date.now();
-    const { output, model } = await this.extractObservation(scenario.transcript);
-    const form = processExtraction(output, scenario.transcript, null, { model });
+    const maritime = scenario.maritime ?? true;
+    const { output, model } = await this.extractObservation(scenario.transcript, { maritime });
+    const form = processExtraction(output, scenario.transcript, null, { model, maritime });
     const proposed = Object.entries(form.fields).filter(([, f]) => f.value !== null);
     return {
       model,
       seconds: (Date.now() - started) / 1000,
       transcript: scenario.transcript,
-      fields: proposed.map(([path, f]) => ({ path, value: f.value, status: f.status })),
+      fields: [
+        ...proposed.map(([path, f]) => ({ path, value: f.value, status: f.status })),
+        ...Object.entries(form.symptoms ?? {}).map(([id, x]) => ({ path: `symptome:${id}`, value: x.presence, status: x.status })),
+      ],
       discarded: form.discarded.length,
     };
   }
