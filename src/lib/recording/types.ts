@@ -1,4 +1,4 @@
-import type { TranscriptionStatus } from "@/types/database";
+import type { Speaker, SpeakerSource, TranscriptionStatus } from "@/types/database";
 
 /** Vue client d'un segment audio (aucun chemin de stockage n'est exposé). */
 export type RecordingInfo = {
@@ -26,12 +26,25 @@ export type TranscriptionInfo = {
   updatedAt: string;
 };
 
+/** Morceau de transcription en direct (texte stable). */
+export type LiveSegmentInfo = {
+  id: string;
+  seq: number;
+  startMs: number;
+  endMs: number;
+  text: string;
+  speaker: Speaker;
+  speakerSource: SpeakerSource;
+};
+
 export type ConsentInfo = { recordingConsentAt: string | null; aiAcknowledgedAt: string | null };
 
 export type RecordingStageData = {
   userId: string;
   recordings: RecordingInfo[];
   transcription: TranscriptionInfo | null;
+  /** Morceaux déjà transcrits en direct (dans l'ordre). */
+  liveSegments: LiveSegmentInfo[];
   consent: ConsentInfo;
   /** Transcription locale (whisper.cpp) prête au chargement de la page. */
   providerConfigured: boolean;

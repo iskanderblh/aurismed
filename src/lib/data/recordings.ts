@@ -5,7 +5,7 @@ import { ollamaHealth } from "@/server/local-ai/ollama";
 import { whisperHealth } from "@/server/local-ai/whisper";
 import { createClient } from "@/server/db/client";
 import type { Tables } from "@/types/database";
-import type { RecordingInfo, RecordingStageData, TranscriptionInfo } from "@/lib/recording/types";
+import type { LiveSegmentInfo, RecordingInfo, RecordingStageData, TranscriptionInfo } from "@/lib/recording/types";
 
 type Client = DbClient;
 
@@ -35,6 +35,18 @@ export function toRecordingInfo(r: Tables<"recordings">): RecordingInfo {
   };
 }
 
+export function toLiveSegmentInfo(s: Tables<"transcription_segments">): LiveSegmentInfo {
+  return {
+    id: s.id,
+    seq: s.seq,
+    startMs: s.start_ms,
+    endMs: s.end_ms,
+    text: s.text,
+    speaker: s.speaker,
+    speakerSource: s.speaker_source,
+  };
+}
+
 export function toTranscriptionInfo(t: Tables<"transcriptions">): TranscriptionInfo {
   return {
     id: t.id,
@@ -57,6 +69,7 @@ export async function getRecordingStageData(
     userId,
     recordings: [],
     transcription: null,
+    liveSegments: [],
     consent: {
       recordingConsentAt: consultation?.recording_consent_at ?? null,
       aiAcknowledgedAt: consultation?.ai_processing_acknowledged_at ?? null,
@@ -67,17 +80,19 @@ export async function getRecordingStageData(
   };
   if (!consultation) return base;
 
-  const [recordings, transcription] = await Promise.all([
+  const [recordings, transcription, live] = await Promise.all([
     db.from("recordings").select("*").eq("consultation_id", consultation.id).order("segment_index"),
     db.from("transcriptions").select("*").eq("consultation_id", consultation.id).maybeSingle(),
+    db.from("transcription_segments").select("*").eq("consultation_id", consultation.id).order("seq"),
   ]);
-  if (recordings.error || transcription.error) {
+  if (recordings.error || transcription.error || live.error) {
     throw new Error("Lecture des enregistrements impossible");
   }
   return {
     ...base,
     recordings: (recordings.data ?? []).map(toRecordingInfo),
     transcription: transcription.data ? toTranscriptionInfo(transcription.data) : null,
+    liveSegments: (live.data ?? []).map(toLiveSegmentInfo),
   };
 }
 

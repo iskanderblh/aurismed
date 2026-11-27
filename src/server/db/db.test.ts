@@ -110,6 +110,24 @@ describe("requêtes limitées au propriétaire", () => {
     expect(dup.error?.code).toBe("23505");
   });
 
+  it("stocke les morceaux de transcription en direct, uniques par numéro et privés", async () => {
+    const db = clientForUser(alice);
+    const ins = await db
+      .from("transcription_segments")
+      .insert({ consultation_id: consultationId, user_id: alice.id, seq: 0, start_ms: 400, end_ms: 2600, text: "Bonjour." })
+      .select("*")
+      .single();
+    expect(ins.error).toBeNull();
+    expect(ins.data).toMatchObject({ speaker: "unknown", speaker_source: "default" });
+    const dup = await db.from("transcription_segments").insert({ consultation_id: consultationId, seq: 0, start_ms: 0, end_ms: 1 });
+    expect(dup.error?.code).toBe("23505");
+    const bad = await db.from("transcription_segments").insert({ consultation_id: consultationId, seq: 1, start_ms: 0, end_ms: 1, speaker: "nurse" as never });
+    expect(bad.error?.code).toBe("23514");
+    expect((await clientForUser(bob).from("transcription_segments").select("id")).data).toEqual([]);
+    const intrusion = await clientForUser(bob).from("transcription_segments").insert({ consultation_id: consultationId, seq: 5, start_ms: 0, end_ms: 1 });
+    expect(intrusion.error).not.toBeNull();
+  });
+
   it("refuse une colonne inconnue", async () => {
     const { error } = await clientForUser(alice).from("consultations").select("id, mot_de_passe");
     expect(error?.code).toBe("42703");

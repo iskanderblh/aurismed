@@ -45,6 +45,7 @@ const META: Record<TableName, TableMeta> = {
     updatedAt: true,
   },
   recordings: { owner: "user_id", json: [], consultation: "required", id: "uuid", updatedAt: false },
+  transcription_segments: { owner: "user_id", json: [], consultation: "required", id: "uuid", updatedAt: true },
   transcriptions: { owner: "user_id", json: [], consultation: "required", id: "uuid", updatedAt: true },
   observation_forms: {
     owner: "user_id",

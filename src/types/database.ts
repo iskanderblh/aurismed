@@ -9,6 +9,8 @@ export type ConsultationStatus = "draft" | "in_progress" | "validated" | "archiv
 export type TranscriptionStatus = "pending" | "processing" | "completed" | "failed";
 export type ObservationValidationStatus = "draft" | "ai_extracted" | "in_review" | "validated";
 export type PrescriptionValidationStatus = "draft" | "validated";
+export type Speaker = "doctor" | "patient" | "unknown";
+export type SpeakerSource = "default" | "ai" | "doctor";
 export type DocumentType = "observation" | "prescription";
 
 export type Database = {
@@ -176,6 +178,44 @@ export type Database = {
           original_filename?: string | null;
           transcript?: string | null;
           created_at?: string;
+        };
+        Relationships: [];
+      };
+      transcription_segments: {
+        Row: {
+          id: string;
+          consultation_id: string;
+          user_id: string;
+          seq: number;
+          start_ms: number;
+          end_ms: number;
+          text: string;
+          speaker: Speaker;
+          speaker_source: SpeakerSource;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          consultation_id: string;
+          user_id?: string;
+          seq: number;
+          start_ms: number;
+          end_ms: number;
+          text?: string;
+          speaker?: Speaker;
+          speaker_source?: SpeakerSource;
+          model?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          text?: string;
+          speaker?: Speaker;
+          speaker_source?: SpeakerSource;
+          model?: string | null;
+          updated_at?: string;
         };
         Relationships: [];
       };
