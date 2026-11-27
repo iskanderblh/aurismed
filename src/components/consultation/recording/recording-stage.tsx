@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useEffectEvent, useRef, useState, useTransition } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -104,12 +104,15 @@ export function RecordingStage({
   data,
   onProgress,
   onTranscriptionChange,
+  onLiveChange,
 }: {
   consultationId: string | null;
   ensureId: () => Promise<string | null>;
   data: RecordingStageData;
   onProgress?: (step: number) => void;
   onTranscriptionChange?: (t: TranscriptionInfo | null) => void;
+  /** Répliques stables et état de l'enregistrement, pour l'analyse au fil de la consultation. */
+  onLiveChange?: (live: { segments: LiveSegmentInfo[]; recording: boolean }) => void;
 }) {
   const [consent, setConsent] = useState<ConsentInfo>(data.consent);
   const [recordings, setRecordings] = useState<RecordingInfo[]>(data.recordings);
@@ -374,6 +377,10 @@ export function RecordingStage({
       recorder.reset();
     });
 
+  const recordingNow = recorder.state === "recording" || recorder.state === "paused";
+  const onLiveChangeEvent = useEffectEvent((segments: LiveSegmentInfo[], recording: boolean) => onLiveChange?.({ segments, recording }));
+  useEffect(() => onLiveChangeEvent(live.segments, recordingNow), [live.segments, recordingNow]);
+
   const consentGiven = Boolean(consent.recordingConsentAt && consent.aiAcknowledgedAt);
   const isLive = recorder.state === "recording" || recorder.state === "paused";
   const confirmed = Boolean(transcription?.confirmedAt);
@@ -590,7 +597,7 @@ export function RecordingStage({
               ? `Transcription… ${Math.min(transcribing.done + 1, transcribing.total)}/${transcribing.total}`
               : transcribeError
                 ? "Reprendre la transcription"
-                : live.segments.length
+                : live.segments.some((s) => s.text.trim())
                   ? "Transcrire depuis l'audio enregistré"
                   : "Transcrire la consultation"}
           </Button>

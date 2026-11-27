@@ -51,7 +51,7 @@ export async function validateObservationForm(consultationId: string, form: Obse
   const parsed = formDataSchema.safeParse(form);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Fiche invalide." };
   const pending = pendingReview(parsed.data as ObservationFormData);
-  if (pending.total > 0) return { ok: false, error: `${pending.total} proposition(s) de l'IA restent à accepter, modifier ou rejeter.` };
+  if (pending.total > 0) return { ok: false, error: `${pending.total} proposition(s) de l'IA ou contradiction(s) restent à revoir (accepter, modifier, rejeter ou trancher).` };
 
   const now = new Date().toISOString();
   const { data, error } = await c.db

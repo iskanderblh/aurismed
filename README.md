@@ -24,7 +24,7 @@ Passage au tout-local et spécialisation urologie :
 | --- | --- | --- |
 | 1 | Architecture locale : base SQLite, comptes locaux, fichiers chiffrés, `LocalMedicalAIService` (whisper.cpp, Ollama), lanceur des moteurs, page « Moteur IA local », scripts Windows | ✅ |
 | 2 | Transcription progressive (VAD, segments chevauchants, texte stable et provisoire, locuteurs) | fait |
-| 3 | Extraction incrémentale, réconciliation, statuts de champ, lien valeur / segment | à venir |
+| 3 | Extraction incrémentale, réconciliation, statuts de champ, lien valeur / segment | fait |
 | 4 | Spécialisation urologie (taxonomie des symptômes, fiche, alertes, espace à trois panneaux) | à venir |
 | 5 | Documents urologie, sauvegardes, conservation et effacement | à venir |
 | 6 | Parcours complet sur 14 cas urologiques synthétiques, hors ligne | à venir |
@@ -150,8 +150,26 @@ ligne ne doit être ajouté.
    converties dans le type du champ (sinon écartées et listées), citation recherchée dans la
    transcription (sinon confiance faible), constante non mesurée, confiance non élevée ou
    contradiction → « À vérifier ». Les champs non mentionnés restent vides.
-4. **Fusion** : une nouvelle analyse ne remplace que les propositions non revues. Ce que le
-   médecin a saisi, corrigé, rejeté ou confirmé est conservé.
+4. **Fusion** : une nouvelle analyse ne remplace jamais en silence. Ce que le médecin a saisi,
+   corrigé, rejeté ou confirmé est conservé ; une valeur différente est signalée comme
+   contradiction. Une proposition antérieure non retrouvée est gardée « À vérifier ».
+4 bis. **Analyse au fil de la consultation** (`src/server/ai/incremental.ts`,
+   `src/lib/medical/reconcile.ts`, route `/api/consultations/[id]/extraction/direct`) : pendant
+   l'enregistrement, les nouvelles répliques stables (par 2, ou une seule après 20 s) sont
+   analysées avec les 4 répliques précédentes en contexte et la liste des valeurs déjà dans la
+   fiche. Le modèle indique pour chaque information le numéro de la réplique citée ; le serveur
+   vérifie la citation dans les répliques et renvoie des propositions, sans écrire la fiche. Le
+   navigateur les fusionne :
+   - champ vide → rempli (« Information extraite » ou « À vérifier »), avec la réplique
+     d'origine (position dans l'enregistrement, interlocuteur) ;
+   - champ déjà rempli → jamais modifié : la nouvelle valeur apparaît comme **information
+     contradictoire**, que le médecin tranche (« Utiliser cette valeur » / « Garder ») ; une
+     contradiction non tranchée bloque la validation ;
+   - champ réservé au médecin ou proposition déjà rejetée → ignoré.
+   À l'arrêt, une **relecture de toute la consultation** (réconciliation) complète les oublis
+   et met à jour la liste des informations manquantes, avec les mêmes règles.
+   Statuts affichés : Information extraite, À vérifier, Information manquante, Modifié par le
+   médecin, Validé par le médecin.
 5. **Revue** : pour chaque champ, accepter, corriger, rejeter (avec possibilité de rétablir) et
    voir la source surlignée dans la transcription. Acceptation groupée possible, uniquement pour
    les propositions à confiance élevée dont la citation a été retrouvée, sur action explicite.

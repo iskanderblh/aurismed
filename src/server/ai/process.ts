@@ -1,6 +1,7 @@
 import { FIELD_BY_PATH, FIELDS } from "@/lib/medical/catalog";
 import {
   emptyFormData,
+  isEmptyValue,
   normalizeValue,
   type FieldState,
   type FieldValue,
@@ -104,7 +105,37 @@ export function processExtraction(
     const ai = proposed.get(field.path);
     if (field.ai === false || before?.status === "manual" || before?.status === "confirmed") {
       // Le médecin garde la main : la nouvelle proposition est seulement mémorisée.
-      if (before) result.fields[field.path] = ai && field.ai !== false ? { ...before, aiValue: ai.value } : before;
+      if (before) {
+        let kept: FieldState = ai && field.ai !== false ? { ...before, aiValue: ai.value } : before;
+        // Valeur du médecin contredite par la transcription : signalée, jamais remplacée.
+        if (ai && field.ai !== false && !isEmptyValue(before.value) && !sameValue(before.value, ai.value) && !sameValue(before.aiValue, ai.value) && !(before.conflicts ?? []).some((c) => sameValue(c.value, ai.value))) {
+          kept = { ...kept, conflicts: [...(before.conflicts ?? []), { value: ai.value!, source: ai.source ?? "", speaker: ai.speaker }].slice(-10) };
+        }
+        result.fields[field.path] = kept;
+      }
+      continue;
+    }
+    const hadProposal = before && (before.status === "extracted" || before.status === "needs_verification") && !isEmptyValue(before.value);
+    if (hadProposal && !ai) {
+      // Proposition antérieure (par exemple de l'analyse au fil de la consultation) non retrouvée : conservée, à vérifier.
+      result.fields[field.path] = {
+        ...before,
+        status: "needs_verification",
+        notes: [...(before.notes ?? []).filter((n) => !n.startsWith("Non retrouvée")), "Non retrouvée par la dernière analyse : à vérifier."],
+      };
+      continue;
+    }
+    if (hadProposal && ai && !sameValue(before.value, ai.value)) {
+      // Jamais de remplacement silencieux : la nouvelle valeur est signalée.
+      result.fields[field.path] = {
+        ...ai,
+        status: "needs_verification",
+        notes: [...(ai.notes ?? []), `Valeur proposée auparavant : ${String(before.value)} (« ${before.source ?? ""} »).`],
+      };
+      continue;
+    }
+    if (hadProposal && ai && before.sourceSeq !== undefined) {
+      result.fields[field.path] = { ...ai, sourceSeq: before.sourceSeq, sourceAt: before.sourceAt };
       continue;
     }
     result.fields[field.path] = ai ?? { value: null, status: "not_mentioned" };

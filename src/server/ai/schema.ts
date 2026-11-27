@@ -6,7 +6,10 @@ import { AI_FIELD_PATHS } from "@/lib/medical/catalog";
  * d'informations extraites, chacune rattachée à un champ connu du catalogue,
  * avec sa citation, sa confiance, qui l'a dite et sa nature.
  */
-export function extractionJsonSchema() {
+export function extractionJsonSchema(options: { segments?: boolean } = {}) {
+  // Analyse au fil de la consultation : chaque information indique le numéro de la réplique citée.
+  const seg = options.segments ? { segment: { type: "integer" } } : {};
+  const segReq = options.segments ? (["segment"] as const) : ([] as const);
   const str = { type: "string" };
   const nullableStr = { type: ["string", "null"] };
   const confidence = { type: "string", enum: ["high", "medium", "low"] };
@@ -23,8 +26,9 @@ export function extractionJsonSchema() {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["path", "value", "confidence", "speaker", "kind", "source_quote", "note"],
+            required: ["path", "value", "confidence", "speaker", "kind", "source_quote", "note", ...segReq],
             properties: {
+              ...seg,
               path: { type: "string", enum: AI_FIELD_PATHS },
               value: str,
               confidence,
@@ -40,8 +44,9 @@ export function extractionJsonSchema() {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["name", "dosage", "posology", "duration_days", "indication", "source_quote", "confidence"],
+            required: ["name", "dosage", "posology", "duration_days", "indication", "source_quote", "confidence", ...segReq],
             properties: {
+              ...seg,
               name: str,
               dosage: nullableStr,
               posology: nullableStr,
@@ -94,6 +99,7 @@ export const aiOutputSchema = z.object({
         kind: z.enum(["reported", "observed", "measured", "instruction"]),
         source_quote: z.string().max(4000),
         note: z.string().max(1000).nullable(),
+        segment: z.number().int().nullable().optional(),
       }),
     )
     .max(400),
@@ -107,6 +113,7 @@ export const aiOutputSchema = z.object({
         indication: z.string().max(300).nullable(),
         source_quote: z.string().max(4000),
         confidence: conf,
+        segment: z.number().int().nullable().optional(),
       }),
     )
     .max(50),
