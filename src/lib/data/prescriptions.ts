@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import { prescriptionSchema, type PrescriptionData } from "@/lib/prescription/schema";
 import type { SettingsValues } from "@/lib/validation/settings";
 import { getSettings } from "./settings";
@@ -31,8 +31,8 @@ export async function getPrescriptionStageData(userId: string, consultationId: s
       }
     : EMPTY_PRESCRIBER;
   if (!consultationId) return { data: null, validationStatus: null, validatedAt: null, prescriber };
-  const supabase = await createClient();
-  const { data } = await supabase
+  const db = await createClient();
+  const { data } = await db
     .from("prescriptions")
     .select("prescription_data, validation_status, validated_at")
     .eq("consultation_id", consultationId)

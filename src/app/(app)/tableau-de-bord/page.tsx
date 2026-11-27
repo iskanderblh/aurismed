@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
 import { getDashboardData } from "@/lib/data/dashboard";
 import { purgeExpiredAudio } from "@/lib/data/recordings";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import { CONSULTATION_STATUS, DOCUMENT_TYPE, formatDateTime, patientDisplayName } from "@/lib/labels";
 
 export const metadata: Metadata = { title: "Tableau de bord" };
@@ -63,7 +63,7 @@ export default async function DashboardPage() {
           <AlertTriangle />
           <AlertTitle>Données indisponibles</AlertTitle>
           <AlertDescription>
-            {result.error} Vérifiez la configuration Supabase et que la migration a bien été appliquée, puis
+            {result.error} Vérifiez que la base locale est accessible, puis
             rechargez la page.
           </AlertDescription>
         </Alert>

@@ -13,7 +13,7 @@ import { getPrescriptionStageData } from "@/lib/data/prescriptions";
 import { listDocuments } from "@/lib/data/documents";
 import { getObservationStageData, getRecordingStageData, purgeExpiredAudio } from "@/lib/data/recordings";
 import { getCurrentUser } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import { CONSULTATION_STATUS, formatDateTime, patientDisplayName } from "@/lib/labels";
 
 export const metadata: Metadata = { title: "Consultation" };

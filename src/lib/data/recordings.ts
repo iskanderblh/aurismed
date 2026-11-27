@@ -1,10 +1,22 @@
 import "server-only";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
-import type { Database, Tables } from "@/types/database";
+import type { DbClient } from "@/server/db/client";
+import { selectedOllamaModel, selectedWhisperModel } from "@/server/local-ai/config";
+import { ollamaHealth } from "@/server/local-ai/ollama";
+import { whisperHealth } from "@/server/local-ai/whisper";
+import { createClient } from "@/server/db/client";
+import type { Tables } from "@/types/database";
 import type { RecordingInfo, RecordingStageData, TranscriptionInfo } from "@/lib/recording/types";
 
-type Client = SupabaseClient<Database>;
+type Client = DbClient;
+
+/** État des moteurs locaux au chargement de la page (affichage d'un avertissement, sans bloquer). */
+async function localEngineReadiness() {
+  const [w, o] = await Promise.all([whisperHealth(), ollamaHealth()]);
+  return {
+    providerConfigured: w.status === "ok" && Boolean(selectedWhisperModel()),
+    extractionConfigured: o.status === "ok" && Boolean(selectedOllamaModel()),
+  };
+}
 
 export function toRecordingInfo(r: Tables<"recordings">): RecordingInfo {
   return {
@@ -39,8 +51,8 @@ export async function getRecordingStageData(
   userId: string,
   consultation: Pick<Tables<"consultations">, "id" | "recording_consent_at" | "ai_processing_acknowledged_at"> | null,
 ): Promise<RecordingStageData> {
-  const supabase = await createClient();
-  const settings = await supabase.from("user_settings").select("audio_retention_days").eq("user_id", userId).maybeSingle();
+  const db = await createClient();
+  const settings = await db.from("user_settings").select("audio_retention_days").eq("user_id", userId).maybeSingle();
   const base: RecordingStageData = {
     userId,
     recordings: [],
@@ -49,15 +61,15 @@ export async function getRecordingStageData(
       recordingConsentAt: consultation?.recording_consent_at ?? null,
       aiAcknowledgedAt: consultation?.ai_processing_acknowledged_at ?? null,
     },
-    providerConfigured: Boolean(process.env.OPENAI_API_KEY),
-    providerLabel: "OpenAI",
+    ...(await localEngineReadiness()),
+    providerLabel: "l'IA locale de ce poste (whisper.cpp et Ollama)",
     retentionDays: settings.data?.audio_retention_days ?? 30,
   };
   if (!consultation) return base;
 
   const [recordings, transcription] = await Promise.all([
-    supabase.from("recordings").select("*").eq("consultation_id", consultation.id).order("segment_index"),
-    supabase.from("transcriptions").select("*").eq("consultation_id", consultation.id).maybeSingle(),
+    db.from("recordings").select("*").eq("consultation_id", consultation.id).order("segment_index"),
+    db.from("transcriptions").select("*").eq("consultation_id", consultation.id).maybeSingle(),
   ]);
   if (recordings.error || transcription.error) {
     throw new Error("Lecture des enregistrements impossible");
@@ -73,26 +85,26 @@ export async function getRecordingStageData(
  * Supprime l'audio dont la durée de conservation est écoulée (après confirmation
  * de la transcription). Appelée à l'ouverture du tableau de bord et des consultations.
  */
-export async function purgeExpiredAudio(supabase: Client): Promise<number> {
-  const { data, error } = await supabase
+export async function purgeExpiredAudio(db: Client): Promise<number> {
+  const { data, error } = await db
     .from("recordings")
     .select("id, storage_path")
     .lte("delete_after", new Date().toISOString())
     .is("deleted_at", null)
     .limit(200);
   if (error || !data?.length) return 0;
-  return deleteAudioFiles(supabase, data);
+  return deleteAudioFiles(db, data);
 }
 
 /** Supprime les fichiers puis marque les lignes comme supprimées (les métadonnées restent). */
-export async function deleteAudioFiles(supabase: Client, rows: { id: string; storage_path: string }[]) {
+export async function deleteAudioFiles(db: Client, rows: { id: string; storage_path: string }[]) {
   if (!rows.length) return 0;
-  const { error } = await supabase.storage.from("recordings").remove(rows.map((r) => r.storage_path));
+  const { error } = await db.storage.from("recordings").remove(rows.map((r) => r.storage_path));
   if (error) {
     console.error("[rétention] suppression des fichiers", error.message);
     return 0;
   }
-  await supabase
+  await db
     .from("recordings")
     .update({ deleted_at: new Date().toISOString() })
     .in(
@@ -112,8 +124,8 @@ export type ObservationStageData = {
 export async function getObservationStageData(consultationId: string | null): Promise<ObservationStageData> {
   if (!consultationId) return { form: null, validationStatus: null, validatedAt: null };
   const { formDataSchema } = await import("@/lib/medical/form-state");
-  const supabase = await createClient();
-  const { data } = await supabase
+  const db = await createClient();
+  const { data } = await db
     .from("observation_forms")
     .select("form_data, validation_status, validated_at")
     .eq("consultation_id", consultationId)

@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import type { Json } from "@/types/database";
 import type { SettingsValues } from "@/lib/validation/settings";
 import type { Result } from "./dashboard";
@@ -9,10 +9,10 @@ const obj = (v: Json | undefined): Record<string, unknown> =>
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
 export async function getSettings(userId: string): Promise<Result<SettingsValues>> {
-  const supabase = await createClient();
+  const db = await createClient();
   const [profile, settings] = await Promise.all([
-    supabase.from("profiles").select("full_name, professional_info").eq("id", userId).maybeSingle(),
-    supabase.from("user_settings").select("audio_retention_days, institution_info").eq("user_id", userId).maybeSingle(),
+    db.from("profiles").select("full_name, professional_info").eq("id", userId).maybeSingle(),
+    db.from("user_settings").select("audio_retention_days, institution_info").eq("user_id", userId).maybeSingle(),
   ]);
   if (profile.error || settings.error) {
     console.error("[paramètres] lecture", profile.error?.message ?? settings.error?.message);

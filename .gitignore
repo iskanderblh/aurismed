@@ -40,3 +40,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# AurisMED local : données patients, clé de chiffrement, moteurs et modèles IA
+/data/
+/moteurs/
+/sauvegardes/

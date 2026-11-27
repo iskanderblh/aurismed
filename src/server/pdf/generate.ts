@@ -5,7 +5,7 @@ import { computeAge } from "@/lib/consultation/schema";
 import { formDataSchema, type ObservationFormData } from "@/lib/medical/form-state";
 import { prescriptionIssues, prescriptionSchema } from "@/lib/prescription/schema";
 import { getPrescriptionStageData } from "@/lib/data/prescriptions";
-import type { createClient } from "@/lib/supabase/server";
+import type { createClient } from "@/server/db/client";
 import type { DocumentType } from "@/types/database";
 import { documentFileName, formatInstant, printableLines } from "./model";
 import { ObservationDocument } from "./observation-document";
@@ -26,12 +26,12 @@ export class DocumentError extends Error {
  * Génère le PDF à partir des seules données validées par le médecin, l'enregistre
  * dans le bucket privé « documents » et crée une nouvelle version.
  */
-export async function generateDocument(supabase: Client, userId: string, consultationId: string, type: DocumentType, timeZone: string) {
+export async function generateDocument(db: Client, userId: string, consultationId: string, type: DocumentType, timeZone: string) {
   const [{ data: consultation }, { data: obs }, { data: rx }, { data: last }] = await Promise.all([
-    supabase.from("consultations").select("*").eq("id", consultationId).maybeSingle(),
-    supabase.from("observation_forms").select("form_data, validation_status, validated_at").eq("consultation_id", consultationId).maybeSingle(),
-    supabase.from("prescriptions").select("prescription_data, validation_status, validated_at").eq("consultation_id", consultationId).maybeSingle(),
-    supabase
+    db.from("consultations").select("*").eq("id", consultationId).maybeSingle(),
+    db.from("observation_forms").select("form_data, validation_status, validated_at").eq("consultation_id", consultationId).maybeSingle(),
+    db.from("prescriptions").select("prescription_data, validation_status, validated_at").eq("consultation_id", consultationId).maybeSingle(),
+    db
       .from("generated_documents")
       .select("version")
       .eq("consultation_id", consultationId)
@@ -91,23 +91,23 @@ export async function generateDocument(supabase: Client, userId: string, consult
 
   const fileName = documentFileName(type, draft.patient.lastName, consultation.consultation_date, version);
   const path = `${userId}/${consultationId}/${type}-v${version}-${Date.now()}.pdf`;
-  const { error: uploadError } = await supabase.storage.from("documents").upload(path, buffer, { contentType: "application/pdf", upsert: false });
+  const { error: uploadError } = await db.storage.from("documents").upload(path, buffer, { contentType: "application/pdf", upsert: false });
   if (uploadError) {
     console.error("[pdf] envoi", uploadError.message);
     throw new DocumentError("Le PDF a été généré mais n'a pas pu être enregistré. Réessayez.", 500);
   }
-  const { data: doc, error } = await supabase
+  const { data: doc, error } = await db
     .from("generated_documents")
     .insert({ consultation_id: consultationId, user_id: userId, document_type: type, storage_path: path, version })
     .select("id, document_type, version, created_at")
     .single();
   if (error || !doc) {
     // Pas de fichier orphelin : on retire le PDF si la ligne n'a pas pu être créée.
-    await supabase.storage.from("documents").remove([path]);
+    await db.storage.from("documents").remove([path]);
     console.error("[pdf] enregistrement", error?.code, error?.message);
     throw new DocumentError(error?.code === "23505" ? "Une génération est déjà en cours. Réessayez." : "Le document n'a pas pu être enregistré.", 500);
   }
-  await supabase.from("audit_logs").insert({
+  await db.from("audit_logs").insert({
     user_id: userId,
     consultation_id: consultationId,
     action: "document.generated",

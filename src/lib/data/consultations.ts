@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import { sanitizeSearch } from "@/lib/consultation/schema";
 import type {
   ConsultationStatus,
@@ -14,8 +14,8 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 export async function getConsultation(id: string): Promise<Result<Tables<"consultations"> | null>> {
   if (!UUID_RE.test(id)) return { ok: true, data: null };
-  const supabase = await createClient();
-  const { data, error } = await supabase.from("consultations").select("*").eq("id", id).maybeSingle();
+  const db = await createClient();
+  const { data, error } = await db.from("consultations").select("*").eq("id", id).maybeSingle();
   if (error) {
     console.error("[consultation] lecture", error.code, error.message);
     return { ok: false, error: "Impossible de charger la consultation." };
@@ -38,8 +38,8 @@ export type HistoryItem = {
 
 /** Historique : consultations du médecin (RLS), recherche par nom ou prénom du patient. */
 export async function listConsultations(query?: string): Promise<Result<HistoryItem[]>> {
-  const supabase = await createClient();
-  let request = supabase
+  const db = await createClient();
+  let request = db
     .from("consultations")
     .select("id, patient_name, patient_first_name, consultation_date, updated_at, status")
     .order("consultation_date", { ascending: false })
@@ -63,11 +63,11 @@ export async function listConsultations(query?: string): Promise<Result<HistoryI
 
   const ids = rows.map((r) => r.id);
   const [recordings, transcriptions, forms, prescriptions, documents] = await Promise.all([
-    supabase.from("recordings").select("consultation_id, transcription_status").in("consultation_id", ids),
-    supabase.from("transcriptions").select("consultation_id").in("consultation_id", ids),
-    supabase.from("observation_forms").select("consultation_id, validation_status").in("consultation_id", ids),
-    supabase.from("prescriptions").select("consultation_id, validation_status").in("consultation_id", ids),
-    supabase.from("generated_documents").select("consultation_id").in("consultation_id", ids),
+    db.from("recordings").select("consultation_id, transcription_status").in("consultation_id", ids),
+    db.from("transcriptions").select("consultation_id").in("consultation_id", ids),
+    db.from("observation_forms").select("consultation_id, validation_status").in("consultation_id", ids),
+    db.from("prescriptions").select("consultation_id, validation_status").in("consultation_id", ids),
+    db.from("generated_documents").select("consultation_id").in("consultation_id", ids),
   ]);
   const failed = [recordings, transcriptions, forms, prescriptions, documents].find((r) => r.error);
   if (failed?.error) {

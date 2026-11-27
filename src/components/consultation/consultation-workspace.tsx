@@ -355,7 +355,7 @@ export function ConsultationWorkspace({
         <ObservationReview
           consultationId={id}
           transcription={transcription}
-          providerConfigured={recordingData.providerConfigured}
+          providerConfigured={recordingData.extractionConfigured}
           providerLabel={recordingData.providerLabel}
           initial={observationData}
           onProgress={(n) => setStep((s) => Math.max(s, n))}

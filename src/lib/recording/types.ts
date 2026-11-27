@@ -33,16 +33,24 @@ export type RecordingStageData = {
   recordings: RecordingInfo[];
   transcription: TranscriptionInfo | null;
   consent: ConsentInfo;
+  /** Transcription locale (whisper.cpp) prête au chargement de la page. */
   providerConfigured: boolean;
+  /** Extraction locale (Ollama + modèle choisi) prête au chargement de la page. */
+  extractionConfigured: boolean;
   providerLabel: string;
   retentionDays: number;
 };
 
-/** Taille maximale d'un fichier envoyé à la transcription (limite OpenAI : 25 Mo). */
-export const MAX_SEGMENT_BYTES = 24 * 1024 * 1024;
 /**
- * Durée d'un segment d'enregistrement micro avant rotation (secondes).
- * 10 minutes à 48 kbit/s ≈ 3,6 Mo, bien sous la limite de transcription.
+ * Taille maximale d'un segment envoyé au serveur. Les segments sont convertis
+ * en WAV 16 kHz mono (32 Ko/s) : 10 minutes ≈ 19 Mo.
+ */
+export const MAX_SEGMENT_BYTES = 24 * 1024 * 1024;
+/** Taille maximale d'un fichier importé (il est ensuite découpé en segments). */
+export const MAX_IMPORT_BYTES = 200 * 1024 * 1024;
+/**
+ * Durée d'un segment d'enregistrement micro avant rotation (secondes), et
+ * longueur maximale des segments d'un fichier importé.
  * Réglable par NEXT_PUBLIC_RECORDING_SEGMENT_SECONDS (entre 2 et 1800).
  */
 export const SEGMENT_SECONDS = (() => {

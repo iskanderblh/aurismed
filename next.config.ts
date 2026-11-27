@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // React PDF (génération des PDF côté serveur) est chargé tel quel par Node.
   serverExternalPackages: ["@react-pdf/renderer"],
+  experimental: {
+    // Les segments audio (jusqu'à 24 Mo) passent par le proxy avant d'être chiffrés sur le disque.
+    proxyClientMaxBodySize: "30mb",
+  },
   turbopack: {
     rules: {
       "*.css": {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import { UUID_RE } from "@/lib/data/consultations";
 import { DocumentError, generateDocument } from "@/server/pdf/generate";
 import { APP_TIME_ZONE } from "@/lib/time";
@@ -19,12 +19,12 @@ export async function POST(request: Request, { params }: RouteContext<"/api/cons
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ ok: false, error: "Requête invalide." }, { status: 400 });
 
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
   if (!auth.user) return NextResponse.json({ ok: false, error: "Session expirée. Reconnectez-vous." }, { status: 401 });
 
   try {
-    const doc = await generateDocument(supabase, auth.user.id, id, parsed.data.type, parsed.data.timeZone);
+    const doc = await generateDocument(db, auth.user.id, id, parsed.data.type, parsed.data.timeZone);
     return NextResponse.json({ ok: true, document: { id: doc.id, type: doc.document_type, version: doc.version, createdAt: doc.created_at } });
   } catch (error) {
     if (error instanceof DocumentError) return NextResponse.json({ ok: false, error: error.message }, { status: error.status });

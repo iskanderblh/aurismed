@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import { settingsSchema } from "@/lib/validation/settings";
 
 export type SettingsState = {
@@ -20,17 +20,17 @@ export async function updateSettings(_prev: SettingsState, formData: FormData): 
     return { error: "Certains champs sont invalides.", fieldErrors: z.flattenError(parsed.error).fieldErrors, values: raw };
   }
 
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
   if (!auth.user) return { error: "Session expirée. Reconnectez-vous.", values: raw };
 
   const v = parsed.data;
   const [profile, settings] = await Promise.all([
-    supabase
+    db
       .from("profiles")
       .update({ full_name: v.fullName || null, professional_info: { specialty: v.specialty, rpps: v.rpps, phone: v.phone } })
       .eq("id", auth.user.id),
-    supabase
+    db
       .from("user_settings")
       .update({
         audio_retention_days: v.audioRetentionDays,
@@ -42,7 +42,7 @@ export async function updateSettings(_prev: SettingsState, formData: FormData): 
     console.error("[paramètres] sauvegarde", profile.error?.message ?? settings.error?.message);
     return { error: "L'enregistrement a échoué. Réessayez.", values: raw };
   }
-  await supabase.from("audit_logs").insert({ user_id: auth.user.id, action: "settings.updated" });
+  await db.from("audit_logs").insert({ user_id: auth.user.id, action: "settings.updated" });
   revalidatePath("/", "layout");
   return { ok: true };
 }

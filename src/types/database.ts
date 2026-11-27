@@ -1,7 +1,6 @@
 /**
- * Types de la base Supabase (miroir de supabase/migrations).
- * Après modification du schéma : `npx supabase gen types typescript --linked > src/types/database.ts`
- * puis réappliquer les alias ci-dessous si nécessaire.
+ * Types des tables de la base locale (miroir de src/server/db/schema.ts).
+ * À mettre à jour à la main après chaque migration ajoutée dans schema.ts.
  */
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];

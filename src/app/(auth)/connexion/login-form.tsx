@@ -9,10 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FieldError, FormStatus } from "@/components/ui/form-message";
 
-export function LoginForm({ next, linkError }: { next?: string; linkError?: boolean }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(signIn, {
-    error: linkError ? "Le lien utilisé est invalide ou a expiré." : undefined,
-  });
+export function LoginForm({ next }: { next?: string }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(signIn, {});
 
   return (
     <form action={action} className="space-y-5" noValidate>
