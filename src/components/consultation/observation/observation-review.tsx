@@ -276,7 +276,7 @@ export function ObservationReview({
           <div className="min-w-0 flex-1 space-y-1 text-sm">
             <p className="font-medium">{form?.extractedAt ? "Analyse IA effectuée" : "Analyse de la transcription par l'IA"}</p>
             <p className="text-muted-foreground">
-              La transcription confirmée sera envoyée à {providerLabel} pour proposer des valeurs. Chaque proposition reste à vérifier :
+              La transcription confirmée sera analysée par {providerLabel}, sans envoi en ligne, pour proposer des valeurs. Chaque proposition reste à vérifier :
               l&apos;IA n&apos;établit pas de diagnostic, ne prescrit pas et ne valide rien.
             </p>
             {form?.extractedAt && (
@@ -299,7 +299,7 @@ export function ObservationReview({
           ) : (
             <Button
               size="sm"
-              disabled={analyzing || !providerConfigured || !confirmed}
+              disabled={analyzing || !confirmed}
               onClick={() => (form?.extractedAt ? setConfirmReanalyze(true) : void analyze())}
             >
               {analyzing ? <Loader2 className="animate-spin" /> : form?.extractedAt ? <RotateCw /> : <Sparkles />}
@@ -313,9 +313,15 @@ export function ObservationReview({
           </p>
         )}
         {!providerConfigured && (
-          <p className="mt-3 text-sm text-warning">Aucun fournisseur d&apos;IA configuré (OPENAI_API_KEY absente). Vous pouvez remplir la fiche manuellement.</p>
+          <p className="mt-3 text-sm text-warning">
+            L&apos;analyse locale n&apos;est pas prête (Ollama arrêté ou aucun modèle choisi) : voir{" "}
+            <a href="/parametres#moteur-ia-local" className="font-medium underline">
+              Paramètres &gt; Moteur IA local
+            </a>
+            . Vous pouvez aussi remplir la fiche manuellement.
+          </p>
         )}
-        {analyzing && <p className="mt-3 text-sm text-muted-foreground">Cela peut prendre jusqu&apos;à une minute pour une longue consultation.</p>}
+        {analyzing && <p className="mt-3 text-sm text-muted-foreground">Sur un poste sans carte graphique, l&apos;analyse locale peut prendre plusieurs minutes.</p>}
         {analysisError && (
           <Alert variant="destructive" className="mt-3">
             <AlertCircle />

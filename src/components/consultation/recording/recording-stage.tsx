@@ -18,11 +18,11 @@ import {
 } from "lucide-react";
 import { deleteAllRecordings, getPlaybackUrl, registerRecording } from "@/app/(app)/consultations/recording-actions";
 import { Badge } from "@/components/ui/badge";
+import { WAV_MIME, toWavSegments } from "@/lib/recording/wav";
 import { Button } from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/client";
 import {
   ACCEPTED_AUDIO_TYPES,
-  MAX_SEGMENT_BYTES,
+  MAX_IMPORT_BYTES,
   SEGMENT_SECONDS,
   baseMime,
   extensionFor,
@@ -38,6 +38,19 @@ import { ConsentPanel } from "./consent-panel";
 import { TranscriptionEditor } from "./transcription-editor";
 import { useSegmentRecorder, type FinishedSegment } from "./use-segment-recorder";
 import { Waveform } from "./waveform";
+
+/** Envoi du segment au serveur local, qui le chiffre avant de l'écrire sur le disque. */
+async function uploadAudio(consultationId: string, path: string, blob: Blob, contentType: string): Promise<boolean> {
+  const body = new FormData();
+  body.set("path", path);
+  body.set("file", new File([blob], path.split("/").pop() ?? "audio", { type: contentType }));
+  try {
+    const res = await fetch(`/api/consultations/${consultationId}/audio`, { method: "POST", body });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 type LocalSegment = {
   key: string;
@@ -119,11 +132,8 @@ export function RecordingStage({
     if (!id) return;
     setLocal((l) => l.map((s) => (s.key === seg.key ? { ...s, status: "uploading", error: undefined } : s)));
     const path = `${data.userId}/${id}/seg-${String(seg.segmentIndex).padStart(4, "0")}-${Date.now()}.${extensionFor(seg.mimeType)}`;
-    const supabase = createClient();
-    const { error: uploadError } = await supabase.storage
-      .from("recordings")
-      .upload(path, seg.blob, { contentType: baseMime(seg.mimeType), upsert: false });
-    let error = uploadError ? "L'envoi du segment a échoué. Il est conservé dans cette page : réessayez." : undefined;
+    const uploadOk = await uploadAudio(id, path, seg.blob, baseMime(seg.mimeType));
+    let error = !uploadOk ? "L'envoi du segment a échoué. Il est conservé dans cette page : réessayez." : undefined;
     if (!error) {
       const result = await registerRecording(id, {
         path,
@@ -151,8 +161,33 @@ export function RecordingStage({
     void upload(seg);
   };
 
+  /**
+   * Convertit en WAV 16 kHz mono (format du moteur local) puis met en file
+   * d'envoi. Si la conversion échoue, l'audio d'origine est envoyé tel quel :
+   * un enregistrement n'est jamais perdu.
+   */
+  const enqueueAudio = async (input: { blob: Blob; mimeType: string; duration: number | null; source: "microphone" | "upload"; originalFilename: string | null }) => {
+    let parts: { blob: Blob; duration: number }[];
+    try {
+      parts = await toWavSegments(input.blob, SEGMENT_SECONDS);
+    } catch {
+      setStageError("La conversion audio a échoué : le fichier d'origine est conservé, mais il ne pourra peut-être pas être transcrit.");
+      return enqueue(input);
+    }
+    parts.forEach((part, i) =>
+      enqueue({
+        blob: part.blob,
+        mimeType: WAV_MIME,
+        duration: part.duration,
+        source: input.source,
+        originalFilename:
+          input.originalFilename && parts.length > 1 ? `${input.originalFilename} (partie ${i + 1}/${parts.length})` : input.originalFilename,
+      }),
+    );
+  };
+
   const recorder = useSegmentRecorder((s: FinishedSegment) =>
-    enqueue({ blob: s.blob, mimeType: s.mimeType, duration: s.duration, source: "microphone", originalFilename: null }),
+    void enqueueAudio({ blob: s.blob, mimeType: s.mimeType, duration: s.duration, source: "microphone", originalFilename: null }),
   );
 
   // Ne jamais quitter la page avec un enregistrement en cours ou un envoi non terminé.
@@ -178,13 +213,11 @@ export function RecordingStage({
         setStageError(`« ${file.name} » n'est pas un format audio pris en charge (webm, ogg, mp3, m4a, wav, flac).`);
         continue;
       }
-      if (file.size > MAX_SEGMENT_BYTES) {
-        setStageError(
-          `« ${file.name} » dépasse 24 Mo, la limite du service de transcription. Découpez-le ou exportez-le en qualité inférieure (mp3 64 kbit/s ≈ 50 min).`,
-        );
+      if (file.size > MAX_IMPORT_BYTES) {
+        setStageError(`« ${file.name} » dépasse 200 Mo. Découpez-le avant de l'importer.`);
         continue;
       }
-      enqueue({ blob: file, mimeType: file.type, duration: await audioDuration(file), source: "upload", originalFilename: file.name });
+      await enqueueAudio({ blob: file, mimeType: file.type, duration: await audioDuration(file), source: "upload", originalFilename: file.name });
     }
     if (fileInput.current) fileInput.current.value = "";
   };
@@ -269,8 +302,14 @@ export function RecordingStage({
       {!data.providerConfigured && (
         <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-warning">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          La transcription n&apos;est pas configurée sur le serveur (OPENAI_API_KEY). Vous pouvez enregistrer ; la
-          transcription sera possible une fois la clé ajoutée.
+          <span>
+            La transcription locale n&apos;est pas prête (moteur arrêté ou aucun modèle choisi). Vous pouvez enregistrer ;
+            démarrez le moteur dans{" "}
+            <a href="/parametres#moteur-ia-local" className="font-medium underline">
+              Paramètres &gt; Moteur IA local
+            </a>{" "}
+            avant de transcrire.
+          </span>
         </div>
       )}
 
@@ -427,7 +466,7 @@ export function RecordingStage({
 
       {recordings.length > 0 && !confirmed && needsTranscription && (
         <div className="flex flex-col items-center gap-3 rounded-xl border p-5 text-center">
-          <Button size="lg" onClick={() => void transcribe()} disabled={!canTranscribe || !data.providerConfigured}>
+          <Button size="lg" onClick={() => void transcribe()} disabled={!canTranscribe}>
             {transcribing ? <Loader2 className="animate-spin" /> : <Wand2 />}
             {transcribing
               ? `Transcription… ${Math.min(transcribing.done + 1, transcribing.total)}/${transcribing.total}`
@@ -436,7 +475,7 @@ export function RecordingStage({
                 : "Transcrire la consultation"}
           </Button>
           <p className="text-xs text-muted-foreground">
-            Transcription en français par {data.providerLabel}. L&apos;audio original est conservé jusqu&apos;à la
+            Transcription en français par {data.providerLabel}, sans envoi en ligne. L&apos;audio original est conservé jusqu&apos;à la
             confirmation de la transcription.
           </p>
           {transcribeError && (

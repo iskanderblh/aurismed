@@ -1,19 +1,20 @@
 /**
  * Évaluation de l'extraction avec le fournisseur réel, sur des scénarios fictifs.
- * Ignorée sans RUN_AI_EVAL=1 et OPENAI_API_KEY : `npm run eval:extraction`.
- * Les transcriptions envoyées sont synthétiques (aucune donnée de patient).
+ * Lancement : `npm run eval:extraction` (Ollama local démarré, OLLAMA_MODEL défini).
+ * Les transcriptions sont synthétiques (aucune donnée de patient) et restent sur le poste.
  */
 import { describe, expect, it } from "vitest";
-import { extractWithOpenAI } from "./openai-extraction";
+import { extractWithLocalModel } from "./local-extraction";
 import { processExtraction } from "./process";
 import { SCENARIOS } from "./scenarios";
 
-const enabled = process.env.RUN_AI_EVAL === "1" && Boolean(process.env.OPENAI_API_KEY);
+// Lancée par `npm run eval:extraction` (mode « eval »), ignorée par `npm test`.
+const enabled = (import.meta as { env?: { MODE?: string } }).env?.MODE === "eval" || process.env.RUN_AI_EVAL === "1";
 
-describe.skipIf(!enabled)("évaluation de l'extraction (fournisseur réel)", () => {
+describe.skipIf(!enabled)("évaluation de l'extraction (modèle local réel)", () => {
   for (const s of SCENARIOS) {
-    it(s.name, { timeout: 120_000 }, async () => {
-      const { output, model } = await extractWithOpenAI(s.transcript);
+    it(s.name, { timeout: 600_000 }, async () => {
+      const { output, model } = await extractWithLocalModel(s.transcript);
       const form = processExtraction(output, s.transcript, null, { model });
       for (const [path, value] of Object.entries(s.expect)) {
         const v = form.fields[path]?.value;

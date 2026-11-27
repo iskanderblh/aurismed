@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { CheckboxField } from "../form-controls";
 
 /**
- * Consentement explicite avant tout enregistrement, et information sur la
- * transmission de l'audio et de la transcription au fournisseur configuré.
+ * Consentement explicite avant tout enregistrement, et information sur le
+ * traitement de l'audio et de la transcription par l'IA locale du poste.
  */
 export function ConsentPanel({
   providerLabel,
@@ -31,8 +31,8 @@ export function ConsentPanel({
         <div className="space-y-2">
           <p className="font-medium">Avant d&apos;enregistrer</p>
           <p>
-            L&apos;audio est stocké dans un espace privé lié à votre compte. Pour la transcription, l&apos;audio puis le
-            texte sont transmis au service <strong>{providerLabel}</strong>, hors de l&apos;infrastructure AurisMED.
+            L&apos;audio est chiffré et stocké sur ce poste, dans un espace lié à votre compte. La transcription et
+            l&apos;analyse sont faites par <strong>{providerLabel}</strong> : aucune donnée n&apos;est envoyée en ligne.
             N&apos;enregistrez que des patients informés et consentants.
           </p>
         </div>
@@ -44,7 +44,7 @@ export function ConsentPanel({
           onChange={setPatientConsent}
         />
         <CheckboxField
-          label={`J'ai pris connaissance que l'audio et la transcription seront transmis à ${providerLabel} pour traitement.`}
+          label="J'ai pris connaissance que l'audio et la transcription seront analysés par l'IA locale de ce poste, sans envoi en ligne."
           checked={aiNotice}
           onChange={setAiNotice}
         />

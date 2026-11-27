@@ -1,27 +1,13 @@
 import "server-only";
-import { OpenAITranscriptionProvider } from "./openai";
-import { TranscriptionError, type TranscriptionProvider } from "./provider";
+import { localMedicalAI } from "@/server/local-ai/service";
+import type { TranscriptionProvider } from "./provider";
 
-export { TranscriptionError } from "./provider";
 export type { TranscriptionProvider } from "./provider";
 
 /**
- * Sélection du fournisseur (TRANSCRIPTION_PROVIDER, « openai » par défaut).
- * Lève TranscriptionError("not_configured") si les identifiants manquent.
+ * Fournisseur de transcription : uniquement le moteur local (whisper.cpp).
+ * Il n'existe volontairement aucun autre fournisseur ni repli en ligne.
  */
 export function getTranscriptionProvider(): TranscriptionProvider {
-  const provider = process.env.TRANSCRIPTION_PROVIDER ?? "openai";
-  switch (provider) {
-    case "openai": {
-      const apiKey = process.env.OPENAI_API_KEY;
-      if (!apiKey) throw new TranscriptionError("not_configured", false);
-      return new OpenAITranscriptionProvider({
-        apiKey,
-        model: process.env.OPENAI_TRANSCRIPTION_MODEL,
-        baseUrl: process.env.OPENAI_BASE_URL,
-      });
-    }
-    default:
-      throw new TranscriptionError("not_configured", false);
-  }
+  return localMedicalAI.transcriptionProvider();
 }

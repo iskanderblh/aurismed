@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { selectedWhisperModel } from "@/server/local-ai/config";
+import { createClient } from "@/server/db/client";
 import { UUID_RE } from "@/lib/data/consultations";
 import { toTranscriptionInfo } from "@/lib/data/recordings";
 import { joinSegments, toParagraphs } from "@/server/transcription/paragraphs";
@@ -13,11 +14,11 @@ export async function POST(_request: Request, { params }: RouteContext<"/api/con
   const { id } = await params;
   if (!UUID_RE.test(id)) return NextResponse.json({ ok: false, error: "Consultation introuvable." }, { status: 404 });
 
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
   if (!auth.user) return NextResponse.json({ ok: false, error: "Session expirée. Reconnectez-vous." }, { status: 401 });
 
-  const { data: segments, error } = await supabase
+  const { data: segments, error } = await db
     .from("recordings")
     .select("segment_index, transcription_status, transcript, deleted_at")
     .eq("consultation_id", id)
@@ -32,7 +33,7 @@ export async function POST(_request: Request, { params }: RouteContext<"/api/con
     );
   }
 
-  const { data: existing } = await supabase.from("transcriptions").select("id, confirmed_at").eq("consultation_id", id).maybeSingle();
+  const { data: existing } = await db.from("transcriptions").select("id, confirmed_at").eq("consultation_id", id).maybeSingle();
   if (existing?.confirmed_at) {
     return NextResponse.json(
       { ok: false, error: "La transcription est déjà confirmée. Supprimez l'enregistrement pour recommencer." },
@@ -47,18 +48,18 @@ export async function POST(_request: Request, { params }: RouteContext<"/api/con
     original_transcript: text,
     corrected_transcript: text,
     language: "fr",
-    provider: process.env.TRANSCRIPTION_PROVIDER ?? "openai",
-    model: process.env.OPENAI_TRANSCRIPTION_MODEL || "gpt-4o-transcribe",
+    provider: "whisper.cpp",
+    model: selectedWhisperModel(),
     confirmed_at: null,
   };
   const { data, error: saveError } = existing
-    ? await supabase.from("transcriptions").update(values).eq("id", existing.id).select("*").single()
-    : await supabase.from("transcriptions").insert(values).select("*").single();
+    ? await db.from("transcriptions").update(values).eq("id", existing.id).select("*").single()
+    : await db.from("transcriptions").insert(values).select("*").single();
   if (saveError || !data) {
     console.error("[transcription] sauvegarde", saveError?.code, saveError?.message);
     return NextResponse.json({ ok: false, error: "La transcription n'a pas pu être enregistrée." }, { status: 500 });
   }
-  await supabase.from("audit_logs").insert({
+  await db.from("audit_logs").insert({
     user_id: auth.user.id,
     consultation_id: id,
     action: "transcription.created",

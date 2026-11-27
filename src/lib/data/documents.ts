@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import type { DocumentType } from "@/types/database";
 import type { Result } from "./dashboard";
 
@@ -20,8 +20,8 @@ const patientLabel = (c?: { patient_name: string | null; patient_first_name: str
 
 /** Documents générés (RLS : uniquement ceux du médecin connecté), du plus récent au plus ancien. */
 export async function listDocuments(opts: { consultationId?: string; type?: DocumentType; limit?: number } = {}): Promise<Result<DocumentInfo[]>> {
-  const supabase = await createClient();
-  let q = supabase
+  const db = await createClient();
+  let q = db
     .from("generated_documents")
     .select("id, document_type, version, created_at, consultation_id")
     .order("created_at", { ascending: false })
@@ -36,7 +36,7 @@ export async function listDocuments(opts: { consultationId?: string; type?: Docu
   const ids = [...new Set(data.map((d) => d.consultation_id))];
   const consultations = new Map<string, { patient_name: string | null; patient_first_name: string | null; consultation_date: string }>();
   if (ids.length) {
-    const { data: rows } = await supabase.from("consultations").select("id, patient_name, patient_first_name, consultation_date").in("id", ids);
+    const { data: rows } = await db.from("consultations").select("id, patient_name, patient_first_name, consultation_date").in("id", ids);
     rows?.forEach((c) => consultations.set(c.id, c));
   }
   const maxVersion = new Map<string, number>();

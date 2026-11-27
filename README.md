@@ -5,78 +5,106 @@ transcrit, extrait les informations médicales et pré-remplit la **fiche d'obse
 (structure de la fiche de référence en 9 pages) ainsi que l'**ordonnance**. Le médecin vérifie,
 corrige et valide ; l'application génère ensuite les PDF.
 
+**Version locale** : tout fonctionne sur un seul poste Windows, sans service en ligne. La
+transcription (whisper.cpp), l'analyse (Ollama), la base (SQLite) et les fichiers (chiffrés) restent
+sur l'ordinateur du médecin. Aucune clé d'API n'est nécessaire et il n'existe aucun repli vers un
+service en ligne : si un moteur local est arrêté, l'application le dit et n'envoie rien ailleurs.
+
 > AurisMED n'est pas un logiciel de gestion de clinique. Pas de facturation, de rendez-vous,
 > de pharmacie, de laboratoire ni de dossier patient complet.
 
 ## État d'avancement
 
+Version initiale (phases 1 à 6, terminées) : fondation, consultation, enregistrement et
+transcription, extraction IA et revue, fiche complète et ordonnance, PDF.
+
+Passage au tout-local et spécialisation urologie :
+
 | Phase | Contenu | État |
 | --- | --- | --- |
-| 1 | Fondation : Next.js, Tailwind, shadcn/ui, Supabase, schéma, connexion, tableau de bord | ✅ |
-| 2 | Consultation : patient, navire, brouillons, historique, paramètres | ✅ |
-| 3 | Enregistrement vocal et transcription | ✅ |
-| 4 | Extraction IA (JSON structuré, confiance, sources) et revue par le médecin | ✅ |
-| 5 | Fiche d'observation complète (décision, schéma des lésions, suivi, diagramme de soins) et ordonnance | ✅ |
-| 6 | PDF (fiche d'observation, ordonnance), page Documents | ✅ |
-| 7 | Tests et finalisation | à venir |
+| 1 | Architecture locale : base SQLite, comptes locaux, fichiers chiffrés, `LocalMedicalAIService` (whisper.cpp, Ollama), lanceur des moteurs, page « Moteur IA local », scripts Windows | ✅ |
+| 2 | Transcription progressive (VAD, segments chevauchants, texte stable et provisoire, locuteurs) | à venir |
+| 3 | Extraction incrémentale, réconciliation, statuts de champ, lien valeur / segment | à venir |
+| 4 | Spécialisation urologie (taxonomie des symptômes, fiche, alertes, espace à trois panneaux) | à venir |
+| 5 | Documents urologie, sauvegardes, conservation et effacement | à venir |
+| 6 | Parcours complet sur 14 cas urologiques synthétiques, hors ligne | à venir |
 
 ## Pile technique
 
 - **Next.js 16** (App Router, Turbopack), **React 19**, **TypeScript**
 - **Tailwind CSS 4**, composants **shadcn/ui** (style new-york, Radix UI), icônes **Lucide**
-- **Supabase** : PostgreSQL, Auth, Row Level Security, Storage privé
-- **Zod** pour la validation des entrées
-- API OpenAI (transcription et extraction), **@react-pdf/renderer** (PDF générés côté serveur)
+- **SQLite** intégré à Node.js (`node:sqlite`, Node 22.13 ou plus récent) : aucune dépendance native
+- Fichiers chiffrés en **AES-256-GCM** (module `crypto` de Node.js)
+- **whisper.cpp** (`whisper-server`) pour la transcription, **Ollama** pour l'analyse, tous deux en local
+- **Zod** pour la validation des entrées, **@react-pdf/renderer** (PDF générés côté serveur)
 
 ## Architecture
 
 ```
 src/
   app/
-    (auth)/              connexion, mot de passe oublié, nouveau mot de passe
+    (auth)/              connexion, premier compte, mot de passe oublié, changement de mot de passe
     (app)/               pages protégées (sidebar) : tableau-de-bord, consultations,
-                         consultations/nouvelle, documents, parametres
-    auth/actions.ts      Server Actions d'authentification
-    auth/confirm/        retour des liens e-mail (réinitialisation)
-    configuration/       écran affiché tant que Supabase n'est pas configuré
-  components/
-    ui/                  composants shadcn/ui
-    layout/              sidebar, en-têtes de page
-  lib/
-    supabase/            clients serveur, navigateur et rafraîchissement de session (proxy)
-    auth.ts              couche d'accès : utilisateur courant vérifié côté serveur
-    data/                lectures en base (côté serveur uniquement)
-    validation/          schémas Zod
-    env.ts               lecture des variables d'environnement
-  proxy.ts               protection des routes (ex-« middleware » dans Next.js 16)
-  types/database.ts      types de la base
-supabase/
-  migrations/            schéma SQL, RLS, buckets privés
-  tests/                 tests d'isolation RLS sur PostgreSQL local
+                         consultations/nouvelle, documents, parametres (dont « Moteur IA local »)
+    api/moteur-ia/       état, démarrage, choix des modèles, tests des moteurs locaux
+    api/fichiers/        liens signés et temporaires vers les fichiers chiffrés
+    auth/actions.ts      Server Actions d'authentification (comptes locaux)
+  components/            ui (shadcn/ui), layout, consultation
+  lib/                   auth.ts (utilisateur courant), data/ (lectures), validation/ (Zod), recording/ (WAV)
+  server/
+    db/                  SQLite : schéma et migrations, requêtes limitées au propriétaire, stockage chiffré
+    auth/                mots de passe (scrypt), comptes, sessions
+    local-ai/            LocalMedicalAIService, clients whisper.cpp et Ollama, lanceur des moteurs, état du poste
+    ai/                  schéma JSON, instructions, extraction locale, contrôles et fusion
+    transcription/       interface TranscriptionProvider, mise en paragraphes
+    pdf/                 gabarits et génération des PDF
+  instrumentation.ts     démarrage automatique des moteurs locaux avec le serveur
+  proxy.ts               protection des routes
+  types/database.ts      types des tables
+scripts/                 réinitialisation de mot de passe, sauvegarde (Node, sans dépendance)
+windows/                 installation, démarrage, sauvegarde, réinitialisation (double-clic)
 ```
 
-Transcription : `src/server/transcription/` (interface `TranscriptionProvider`, implémentation
-OpenAI, mise en paragraphes), routes `src/app/api/recordings/[id]/transcribe` et
-`src/app/api/consultations/[id]/transcription`, interface dans
-`src/components/consultation/recording/`.
+### Données locales
 
-Extraction : `src/lib/medical/` (catalogue des champs de la fiche, état et validation),
-`src/server/ai/` (schéma JSON, instructions, appel OpenAI, contrôles et fusion), route
-`src/app/api/consultations/[id]/extraction`, interface dans `src/components/consultation/observation/`.
+Tout est rangé dans `data/` (ou `AURISMED_DATA_DIR`) :
 
-PDF : `src/server/pdf/` (mise en forme testée dans `model.ts`, gabarits React PDF, génération et
-stockage dans `generate.ts`), routes `src/app/api/consultations/[id]/documents` (génération) et
-`src/app/api/documents/[id]` (ouverture / téléchargement), page `src/app/(app)/documents`.
+- `aurismed.db` : base SQLite (mode WAL, clés étrangères, `secure_delete`). Les migrations de
+  `src/server/db/schema.ts` s'appliquent au démarrage.
+- `fichiers/` : audio et PDF chiffrés (`<compartiment>/<user_id>/<consultation_id>/<fichier>.enc`).
+- `cle/aurismed.key` : clé de chiffrement, créée au premier lancement. **À sauvegarder à part** :
+  sans elle, les fichiers sont illisibles.
+
+La sécurité au niveau des lignes de l'ancienne base est reprise par `src/server/db/query.ts` :
+chaque requête est liée à l'utilisateur de la session et ne voit, ne crée, ne modifie et ne
+supprime que ses lignes ; les tables liées à une consultation vérifient qu'elle lui appartient ;
+le journal d'audit est en ajout seul (déclencheurs SQLite).
+
+### Moteur IA local
+
+`LocalMedicalAIService` (`src/server/local-ai/service.ts`) est le seul point d'entrée de l'IA :
+
+- **Transcription** : `whisper-server` (whisper.cpp) sur `127.0.0.1:8178`, en français. L'audio
+  est converti dans le navigateur en WAV 16 kHz mono (aucun ffmpeg à installer).
+- **Analyse** : Ollama sur `127.0.0.1:11434`, sortie JSON contrainte par le schéma de la fiche,
+  température 0, validée puis contrôlée comme avant (citations, limites, champs du médecin protégés).
+- **Lanceur** : au démarrage du serveur, whisper-server est lancé avec le modèle choisi et Ollama
+  s'il ne tourne pas déjà. La page Paramètres > Moteur IA local affiche l'état, les modèles, la
+  mémoire, la carte graphique et l'espace disque, et permet de démarrer, redémarrer, choisir les
+  modèles et tester le micro, la transcription et l'analyse.
+- Les adresses des moteurs ne peuvent désigner que ce poste (`127.0.0.1`, `localhost`) : toute
+  autre adresse est refusée.
 
 ## Enregistrement et transcription
 
 1. **Consentement** : avant le premier enregistrement, le médecin confirme l'accord du patient et
-   prend connaissance de l'envoi de l'audio et du texte au fournisseur (OpenAI). Les deux
+   prend connaissance de l'analyse de l'audio et du texte par l'IA locale du poste. Les deux
    horodatages sont stockés sur la consultation.
 2. **Enregistrement** (MediaRecorder) : pause, reprise, arrêt, durée, niveau audio, état du micro.
-   Toutes les 10 minutes, le segment en cours est clos et envoyé dans le bucket privé
-   `recordings`, puis un nouveau segment démarre. Un segment dont l'envoi échoue reste dans la
-   page avec un bouton Réessayer. Import de fichiers audio possible (24 Mo maximum par fichier).
+   Toutes les 10 minutes, le segment en cours est clos, converti en WAV 16 kHz mono, chiffré et
+   écrit sur le disque, puis un nouveau segment démarre. Un segment dont l'envoi échoue reste dans
+   la page avec un bouton Réessayer. Import de fichiers audio possible (200 Mo maximum, découpés
+   en segments de 10 minutes).
 3. **Transcription** : chaque segment est envoyé séparément (langue `fr`, vocabulaire médical en
    indication, fin du segment précédent pour la continuité), puis les textes sont assemblés et
    mis en paragraphes sans modifier les mots. Une erreur s'affiche sur le segment concerné et la
@@ -86,8 +114,8 @@ stockage dans `generate.ts`), routes `src/app/api/consultations/[id]/documents` 
    0 = suppression immédiate). Les fichiers expirés sont supprimés à l'ouverture du tableau de
    bord ou d'une consultation.
 
-Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter dans
-`src/server/transcription/index.ts` (variable `TRANSCRIPTION_PROVIDER`).
+Le seul fournisseur est whisper.cpp local (`src/server/local-ai/whisper.ts`) ; aucun service en
+ligne ne doit être ajouté.
 
 ## Extraction IA et revue de la fiche
 
@@ -95,8 +123,8 @@ Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter 
    (type, options, unités, limites plausibles) sert à la fois au formulaire, aux instructions de
    l'IA, au schéma JSON strict et à la validation serveur. Les champs de décision et d'envoi au
    CCMM ne sont jamais proposés à l'IA.
-2. **Analyse** : la transcription confirmée (texte corrigé) est envoyée au modèle
-   `OPENAI_EXTRACTION_MODEL` (température 0, `json_schema` strict). Chaque proposition doit
+2. **Analyse** : la transcription confirmée (texte corrigé) est analysée par le modèle Ollama
+   choisi (température 0, sortie contrainte par le schéma JSON). Chaque proposition doit
    citer l'extrait exact de la transcription, le locuteur, la nature (rapportée, observée,
    mesurée) et une confiance. L'IA ne doit ni inventer, ni poser de diagnostic, ni déduire une
    posologie.
@@ -113,8 +141,8 @@ Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter 
    automatiquement ; la validation est refusée (côté serveur aussi) tant qu'une proposition n'a
    pas été revue, et toute modification ultérieure la repasse en vérification.
 
-Évaluation avec le vrai fournisseur sur 8 scénarios fictifs (`src/server/ai/scenarios.ts`) :
-`OPENAI_API_KEY=… npm run eval:extraction` (les transcriptions envoyées sont synthétiques).
+Évaluation du modèle local sur 8 scénarios fictifs (`src/server/ai/scenarios.ts`) :
+`npm run eval:extraction` (Ollama démarré, `OLLAMA_MODEL` défini ou modèle choisi dans Paramètres).
 
 ## Décision, suivi et ordonnance
 
@@ -148,95 +176,85 @@ Pour changer de fournisseur : implémenter `TranscriptionProvider` et l'ajouter 
 - **Versions** : chaque génération crée une nouvelle version (unicité garantie en base) ; les
   anciennes restent consultables. Un avertissement apparaît si la fiche ou l'ordonnance a été
   validée à nouveau depuis le dernier PDF.
-- **Accès** : fichiers dans le bucket privé `documents` (`<user_id>/<consultation_id>/`). Ouvrir ou
-  télécharger passe par `/api/documents/[id]`, qui vérifie l'accès (RLS) puis redirige vers une URL
-  signée valable 60 secondes. Génération et téléchargement sont journalisés.
+- **Accès** : PDF chiffrés sur le disque (`documents/<user_id>/<consultation_id>/`). Ouvrir ou
+  télécharger passe par `/api/documents/[id]`, qui vérifie l'accès puis redirige vers un lien
+  signé valable 60 secondes, lui-même refusé sans la session du propriétaire. Génération et
+  téléchargement sont journalisés.
 - Les heures affichées utilisent `NEXT_PUBLIC_APP_TIME_ZONE` (Europe/Paris par défaut) ; le PDF
   utilise le fuseau du navigateur du médecin.
 
-## Installation
+## Installation sur Windows
 
-Prérequis : Node.js 20.9 ou plus récent, un projet Supabase (l'offre gratuite suffit).
+Prérequis : Windows 10 ou 11, 10 Go libres au minimum, Node.js 22.13 ou plus récent (proposé par
+l'installation via winget s'il manque).
+
+1. Double-cliquez sur **`windows\Installer-AurisMED.cmd`**. Le script :
+   - vérifie Node.js, la mémoire, la carte graphique et l'espace disque ;
+   - installe les dépendances et construit l'application (télémétrie Next.js désactivée) ;
+   - télécharge whisper.cpp (version processeur, ou CUDA si une carte NVIDIA est détectée) ;
+   - vous **demande** quel modèle de transcription et quel modèle d'analyse télécharger, en
+     recommandant celui qui convient à votre poste (rien n'est choisi à votre place, et le plus gros
+     modèle n'est jamais pris d'office) ;
+   - installe Ollama s'il manque (winget) et télécharge le modèle d'analyse choisi ;
+   - propose un raccourci « AurisMED » sur le Bureau.
+2. Double-cliquez sur **`windows\Demarrer-AurisMED.cmd`** (ou le raccourci). Le navigateur s'ouvre
+   sur `http://127.0.0.1:3000` ; au premier lancement, créez le compte du médecin.
+3. Après le premier lancement, copiez `data\cle\aurismed.key` sur un support séparé.
+
+Seuls les programmes et les modèles d'IA sont téléchargés pendant l'installation ; aucune donnée
+de patient ne quitte le poste. Le serveur n'écoute que sur `127.0.0.1` : il n'est pas joignable
+depuis le réseau.
+
+| Outil (dossier `windows`) | Rôle |
+| --- | --- |
+| `Installer-AurisMED.cmd` | installation ou mise à jour des moteurs et modèles |
+| `Demarrer-AurisMED.cmd` | démarrage de l'application et des moteurs |
+| `Sauvegarder-AurisMED.cmd [dossier]` | copie de la base et des fichiers chiffrés (la clé n'est pas incluse) |
+| `Reinitialiser-mot-de-passe.cmd` | nouveau mot de passe pour un compte (ferme ses sessions) |
+
+### Développement
 
 ```bash
 npm install
-cp .env.example .env.local     # puis renseignez les valeurs
+npm run dev          # http://127.0.0.1:3000
 ```
 
-### 1. Créer la base de données
-
-Option A, éditeur SQL de Supabase : exécutez dans l'ordre chaque fichier de
-`supabase/migrations/` (`20261125000000_initial_schema.sql`, `20261125010000_consultation_call_information.sql`,
-`20261125020000_recording_transcripts.sql`, `20261125030000_document_versions.sql`).
-
-Option B, CLI Supabase :
-
-```bash
-npx supabase login
-npx supabase link --project-ref <votre-ref>
-npx supabase db push
-```
-
-La migration crée les tables, les index, les politiques RLS, le journal d'audit et deux buckets
-privés (`recordings`, `documents`).
-
-### 2. Configurer l'authentification
-
-Dans Supabase > Authentication :
-
-1. **Sign In / Providers** : désactivez « Allow new users to sign up » (comptes créés uniquement
-   par l'administrateur).
-2. **Users > Add user** : créez le compte du médecin (e-mail et mot de passe, « Auto Confirm User »).
-3. **URL Configuration** : `Site URL` = votre `NEXT_PUBLIC_SITE_URL`, et ajoutez
-   `http://localhost:3000/auth/confirm` (et l'URL de production) aux « Redirect URLs ».
-4. **Emails > Reset Password** (recommandé) : remplacez le lien par
-   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/reinitialiser-mot-de-passe`.
-
-Le nom du médecin, son n° RPPS, l'établissement et la durée de conservation de l'audio se règlent
-ensuite dans **Paramètres**.
-
-### 3. Lancer l'application
-
-```bash
-npm run dev          # http://localhost:3000
-npm run build && npm start   # production locale
-```
+Les variables facultatives (dossiers, adresses et modèles des moteurs) sont décrites dans
+`.env.example`.
 
 ## Scripts
 
 | Commande | Rôle |
 | --- | --- |
 | `npm run dev` | serveur de développement |
-| `npm run build` | build de production |
+| `npm run build` / `npm start` | build et serveur de production (127.0.0.1:3000) |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | génération des types de routes + TypeScript |
-| `npm test` | tests unitaires (Vitest) : validation, calcul de l'âge, conversion formulaire / base, mise en paragraphes, contrôles et fusion de l'extraction, règles de l'ordonnance, mise en forme et rendu des PDF (contenu vérifié avec `pdftotext` s'il est installé) |
-| `npm run eval:extraction` | évaluation de l'extraction sur des scénarios fictifs avec le fournisseur réel (clé requise, appels facturés) |
-| `npm run test:db` | applique la migration sur un PostgreSQL local jetable et vérifie l'isolation RLS (nécessite `initdb`, `pg_ctl` et `psql`) |
-
-## Services externes et identifiants
-
-| Service | Variables | Nécessaire pour |
-| --- | --- | --- |
-| Supabase | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | toute l'application |
-| OpenAI | `OPENAI_API_KEY`, `OPENAI_TRANSCRIPTION_MODEL`, `OPENAI_EXTRACTION_MODEL` | transcription (phase 3), extraction (phase 4) |
-
-Les clés OpenAI ne sont lues que côté serveur. La clé publique Supabase est conçue pour être
-exposée : l'accès aux données est contrôlé par la RLS.
+| `npm test` | tests unitaires (Vitest) : base locale (isolation entre comptes, journal en ajout seul, contraintes), comptes et sessions, chiffrement des fichiers, conversion WAV, validation, extraction, ordonnance, PDF |
+| `npm run eval:extraction` | évaluation de l'extraction sur des scénarios fictifs avec le modèle local |
+| `npm run compte:reinitialiser` | réinitialisation d'un mot de passe |
+| `npm run sauvegarder` | sauvegarde de la base et des fichiers |
 
 ## Sécurité et données de santé
 
-- Routes protégées par le proxy, puis vérification de l'utilisateur côté serveur à chaque page.
-- RLS sur toutes les tables : chaque médecin n'accède qu'à ses propres lignes ; les tables liées
-  vérifient en plus que la consultation lui appartient. Aucun accès anonyme.
-- Fichiers audio et PDF dans des buckets **privés**, rangés par utilisateur, sans URL publique
-  (accès par URL signée de courte durée).
-- Journal d'audit en ajout seul : connexion, déconnexion, changement de mot de passe, analyse IA,
-  validations, génération et téléchargement des documents (métadonnées uniquement).
+- **Aucun envoi en ligne** : transcription, analyse, base et fichiers restent sur le poste. Pas de
+  clé d'API, pas de repli vers un service externe, télémétrie Next.js désactivée.
+- **Comptes locaux** : mots de passe hachés (scrypt), sessions par jeton aléatoire (seule son
+  empreinte est en base, cookie `httpOnly`), expiration après 12 h d'inactivité, 5 essais puis
+  blocage de 5 minutes, sessions fermées au changement de mot de passe.
+- **Isolation** : chaque médecin n'accède qu'à ses lignes et à ses fichiers (vérifié par des tests).
+- **Chiffrement** : audio et PDF chiffrés en AES-256-GCM ; liens de lecture signés, valables
+  60 secondes et liés à la session du propriétaire. La base SQLite elle-même n'est pas chiffrée :
+  activez **BitLocker** sur le disque du poste.
+- **Effacement** : les fichiers supprimés sont écrasés avant suppression et la base efface les
+  pages libérées (`secure_delete`). Sur un SSD, l'écrasement n'est pas garanti au niveau physique :
+  BitLocker reste la protection de référence.
+- Journal d'audit en ajout seul : connexion, déconnexion, mots de passe, actions sur les moteurs,
+  analyse IA, validations, génération et téléchargement des documents (métadonnées uniquement).
 - En-têtes de sécurité (`X-Frame-Options`, `nosniff`, `Permissions-Policy` limitant le micro au
-  site), pages authentifiées en `Cache-Control: private, no-store`, pas d'indexation.
-- Consentement explicite à l'enregistrement, information sur la transmission de l'audio et de la
-  transcription au fournisseur d'IA, rétention configurable de l'audio.
+  site), pages authentifiées en `Cache-Control: private, no-store`.
+- Consentement explicite à l'enregistrement, information sur l'analyse par l'IA locale, rétention
+  configurable de l'audio.
 
 **Utilisez uniquement des données synthétiques en développement et en test.** Cette application
 n'a fait l'objet d'aucune évaluation réglementaire (RGPD, hébergement de données de santé,

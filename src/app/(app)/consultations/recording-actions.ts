@@ -1,7 +1,7 @@
 "use server";
 
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/server/db/client";
 import { UUID_RE } from "@/lib/data/consultations";
 import { deleteAudioFiles, toRecordingInfo, toTranscriptionInfo } from "@/lib/data/recordings";
 import { ACCEPTED_AUDIO_TYPES, MAX_SEGMENT_BYTES, baseMime, type RecordingInfo, type TranscriptionInfo } from "@/lib/recording/types";
@@ -10,16 +10,16 @@ type Fail = { ok: false; error: string };
 
 async function context(consultationId: string) {
   if (!UUID_RE.test(consultationId)) return { error: "Consultation introuvable." } as const;
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
+  const db = await createClient();
+  const { data: auth } = await db.auth.getUser();
   if (!auth.user) return { error: "Session expirée. Reconnectez-vous ; l'enregistrement en cours reste dans cette page." } as const;
-  const { data: consultation } = await supabase
+  const { data: consultation } = await db
     .from("consultations")
     .select("id, status, recording_consent_at, ai_processing_acknowledged_at")
     .eq("id", consultationId)
     .maybeSingle();
   if (!consultation) return { error: "Consultation introuvable." } as const;
-  return { supabase, user: auth.user, consultation } as const;
+  return { db, user: auth.user, consultation } as const;
 }
 
 /** Enregistre le consentement du patient et l'information sur l'envoi au fournisseur d'IA. */
@@ -29,7 +29,7 @@ export async function acknowledgeConsent(
   const ctx = await context(consultationId);
   if ("error" in ctx) return { ok: false, error: ctx.error! };
   const now = new Date().toISOString();
-  const { data, error } = await ctx.supabase
+  const { data, error } = await ctx.db
     .from("consultations")
     .update({
       recording_consent_at: ctx.consultation.recording_consent_at ?? now,
@@ -40,7 +40,7 @@ export async function acknowledgeConsent(
     .select("recording_consent_at, ai_processing_acknowledged_at")
     .single();
   if (error) return { ok: false, error: "Le consentement n'a pas pu être enregistré." };
-  await ctx.supabase.from("audit_logs").insert({
+  await ctx.db.from("audit_logs").insert({
     user_id: ctx.user.id,
     consultation_id: consultationId,
     action: "consultation.consent_recorded",
@@ -77,7 +77,7 @@ export async function registerRecording(
   }
   if (!ACCEPTED_AUDIO_TYPES.includes(baseMime(v.mimeType))) return { ok: false, error: "Format audio non pris en charge." };
 
-  const { data, error } = await ctx.supabase
+  const { data, error } = await ctx.db
     .from("recordings")
     .insert({
       consultation_id: consultationId,
@@ -99,7 +99,7 @@ export async function registerRecording(
       error: error.code === "23505" ? "Ce segment est déjà enregistré." : "Le segment a été envoyé mais n'a pas pu être référencé.",
     };
   }
-  await ctx.supabase.from("audit_logs").insert({
+  await ctx.db.from("audit_logs").insert({
     user_id: ctx.user.id,
     consultation_id: consultationId,
     action: v.source === "upload" ? "recording.imported" : "recording.uploaded",
@@ -115,14 +115,14 @@ export async function getPlaybackUrl(consultationId: string, recordingId: string
   const ctx = await context(consultationId);
   if ("error" in ctx) return { ok: false, error: ctx.error! };
   if (!UUID_RE.test(recordingId)) return { ok: false, error: "Segment introuvable." };
-  const { data: rec } = await ctx.supabase
+  const { data: rec } = await ctx.db
     .from("recordings")
     .select("storage_path, deleted_at")
     .eq("id", recordingId)
     .eq("consultation_id", consultationId)
     .maybeSingle();
   if (!rec || rec.deleted_at) return { ok: false, error: "Audio supprimé ou introuvable." };
-  const { data, error } = await ctx.supabase.storage.from("recordings").createSignedUrl(rec.storage_path, 300);
+  const { data, error } = await ctx.db.storage.from("recordings").createSignedUrl(rec.storage_path, 300);
   if (error || !data) return { ok: false, error: "Lecture impossible pour le moment." };
   return { ok: true, url: data.signedUrl };
 }
@@ -134,21 +134,21 @@ export async function getPlaybackUrl(consultationId: string, recordingId: string
 export async function deleteAllRecordings(consultationId: string): Promise<{ ok: true } | Fail> {
   const ctx = await context(consultationId);
   if ("error" in ctx) return { ok: false, error: ctx.error! };
-  const { data: rows, error } = await ctx.supabase.from("recordings").select("id, storage_path, deleted_at").eq("consultation_id", consultationId);
+  const { data: rows, error } = await ctx.db.from("recordings").select("id, storage_path, deleted_at").eq("consultation_id", consultationId);
   if (error) return { ok: false, error: "Les enregistrements n'ont pas pu être lus." };
 
   // Fichiers orphelins éventuels (envoi interrompu avant référencement) : on vide tout le dossier.
   const prefix = `${ctx.user.id}/${consultationId}`;
-  const { data: files } = await ctx.supabase.storage.from("recordings").list(prefix, { limit: 1000 });
+  const { data: files } = await ctx.db.storage.from("recordings").list(prefix, { limit: 1000 });
   const paths = new Set([...(files ?? []).map((f) => `${prefix}/${f.name}`), ...(rows ?? []).filter((r) => !r.deleted_at).map((r) => r.storage_path)]);
   if (paths.size) {
-    const { error: removeError } = await ctx.supabase.storage.from("recordings").remove([...paths]);
+    const { error: removeError } = await ctx.db.storage.from("recordings").remove([...paths]);
     if (removeError) return { ok: false, error: "La suppression des fichiers audio a échoué. Rien n'a été effacé." };
   }
-  const del = await ctx.supabase.from("recordings").delete().eq("consultation_id", consultationId);
-  const delT = await ctx.supabase.from("transcriptions").delete().eq("consultation_id", consultationId);
+  const del = await ctx.db.from("recordings").delete().eq("consultation_id", consultationId);
+  const delT = await ctx.db.from("transcriptions").delete().eq("consultation_id", consultationId);
   if (del.error || delT.error) return { ok: false, error: "Les fichiers ont été supprimés mais pas leurs références. Réessayez." };
-  await ctx.supabase.from("audit_logs").insert({
+  await ctx.db.from("audit_logs").insert({
     user_id: ctx.user.id,
     consultation_id: consultationId,
     action: "recording.deleted_all",
@@ -170,7 +170,7 @@ export async function saveTranscriptCorrection(
   if ("error" in ctx) return { ok: false, error: ctx.error! };
   const parsed = transcriptSchema.safeParse(text);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
-  const { data, error } = await ctx.supabase
+  const { data, error } = await ctx.db
     .from("transcriptions")
     .update({ corrected_transcript: parsed.data })
     .eq("consultation_id", consultationId)
@@ -195,7 +195,7 @@ export async function confirmTranscription(
   if (!parsed.data.trim()) return { ok: false, error: "La transcription est vide." };
 
   const now = new Date();
-  const { data: transcription, error } = await ctx.supabase
+  const { data: transcription, error } = await ctx.db
     .from("transcriptions")
     .update({ corrected_transcript: parsed.data, confirmed_at: now.toISOString() })
     .eq("consultation_id", consultationId)
@@ -203,15 +203,15 @@ export async function confirmTranscription(
     .maybeSingle();
   if (error || !transcription) return { ok: false, error: "La transcription n'a pas pu être confirmée." };
 
-  const { data: settings } = await ctx.supabase.from("user_settings").select("audio_retention_days").eq("user_id", ctx.user.id).maybeSingle();
+  const { data: settings } = await ctx.db.from("user_settings").select("audio_retention_days").eq("user_id", ctx.user.id).maybeSingle();
   const days = settings?.audio_retention_days ?? 30;
   const deleteAfter = new Date(now.getTime() + days * 86_400_000).toISOString();
-  await ctx.supabase.from("recordings").update({ delete_after: deleteAfter }).eq("consultation_id", consultationId).is("deleted_at", null);
+  await ctx.db.from("recordings").update({ delete_after: deleteAfter }).eq("consultation_id", consultationId).is("deleted_at", null);
   if (days === 0) {
-    const { data: rows } = await ctx.supabase.from("recordings").select("id, storage_path").eq("consultation_id", consultationId).is("deleted_at", null);
-    await deleteAudioFiles(ctx.supabase, rows ?? []);
+    const { data: rows } = await ctx.db.from("recordings").select("id, storage_path").eq("consultation_id", consultationId).is("deleted_at", null);
+    await deleteAudioFiles(ctx.db, rows ?? []);
   }
-  await ctx.supabase.from("audit_logs").insert({
+  await ctx.db.from("audit_logs").insert({
     user_id: ctx.user.id,
     consultation_id: consultationId,
     action: "transcription.confirmed",
@@ -220,6 +220,6 @@ export async function confirmTranscription(
     metadata: { audio_retention_days: days },
   });
 
-  const { data: recordings } = await ctx.supabase.from("recordings").select("*").eq("consultation_id", consultationId).order("segment_index");
+  const { data: recordings } = await ctx.db.from("recordings").select("*").eq("consultation_id", consultationId).order("segment_index");
   return { ok: true, transcription: toTranscriptionInfo(transcription), recordings: (recordings ?? []).map(toRecordingInfo) };
 }

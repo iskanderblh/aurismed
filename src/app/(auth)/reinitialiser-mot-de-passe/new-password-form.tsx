@@ -14,6 +14,11 @@ export function NewPasswordForm() {
     <form action={action} className="space-y-5" noValidate>
       <FormStatus error={state.error} />
       <div className="space-y-2">
+        <Label htmlFor="current">Mot de passe actuel</Label>
+        <Input id="current" name="current" type="password" autoComplete="current-password" required />
+        <FieldError id="current-error" messages={state.fieldErrors?.current} />
+      </div>
+      <div className="space-y-2">
         <Label htmlFor="password">Nouveau mot de passe</Label>
         <Input id="password" name="password" type="password" autoComplete="new-password" required />
         <FieldError id="password-error" messages={state.fieldErrors?.password} />
